@@ -6,11 +6,13 @@
     "license": "MIT",
     "require": {
         "php": "^8.2",
+        "barryvdh/laravel-dompdf": "^3.1",
         "intervention/image-laravel": "^1.5",
         "laravel/framework": "^11.0",
         "laravel/sanctum": "^4.0",
         "laravel/socialite": "^5.26",
         "laravel/tinker": "^2.9",
+        "maatwebsite/excel": "*",
         "php-open-source-saver/jwt-auth": "^2.3",
         "spatie/laravel-permission": "^6.25"
     },

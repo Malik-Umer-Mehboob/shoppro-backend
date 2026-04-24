@@ -21,6 +21,15 @@ return Application::configure(basePath: dirname(__DIR__))
             'seller' => \App\Http\Middleware\SellerMiddleware::class,
             'customer' => \App\Http\Middleware\CustomerMiddleware::class,
             'support' => \App\Http\Middleware\SupportMiddleware::class,
+            'admin_or_seller' => \App\Http\Middleware\AdminOrSellerMiddleware::class,
+            'admin_or_support' => \App\Http\Middleware\AdminOrSupportMiddleware::class,
+            'locale' => \App\Http\Middleware\LocaleMiddleware::class,
+            'affiliate_tracking' => \App\Http\Middleware\AffiliateTrackingMiddleware::class,
+        ]);
+
+        $middleware->appendToGroup('api', [
+            \App\Http\Middleware\LocaleMiddleware::class,
+            \App\Http\Middleware\AffiliateTrackingMiddleware::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

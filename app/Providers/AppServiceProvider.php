@@ -19,6 +19,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        \Illuminate\Support\Facades\Gate::define('manage-blog', function ($user) {
+            return $user->hasRole('admin') || $user->hasRole('editor');
+        });
+
+        \Illuminate\Support\Facades\Gate::define('create-blog', function ($user) {
+            return $user->hasRole('admin') || $user->hasRole('editor') || $user->hasRole('author');
+        });
     }
 }

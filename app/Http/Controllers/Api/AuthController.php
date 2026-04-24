@@ -71,77 +71,82 @@ class AuthController extends Controller
             'password' => 'required|string',
         ]);
 
-        $lockoutTime = 15; // minutes
+        // Step 1 - Rate limit check FIRST (before anything else)
         $maxAttempts = 5;
+        $lockoutMinutes = 15;
 
         $recentAttempts = LoginAttempt::where('email', $request->email)
-            ->where('attempted_at', '>=', now()->subMinutes($lockoutTime))
+            ->where('attempted_at', '>=', now()->subMinutes($lockoutMinutes))
             ->count();
 
         if ($recentAttempts >= $maxAttempts) {
-            $oldestAttempt = LoginAttempt::where('email', $request->email)
-                ->where('attempted_at', '>=', now()->subMinutes($lockoutTime))
+            $firstAttempt = LoginAttempt::where('email', $request->email)
+                ->where('attempted_at', '>=', now()->subMinutes($lockoutMinutes))
                 ->oldest('attempted_at')
                 ->first();
-            
-            $unlockTime = $oldestAttempt->attempted_at
-                ->addMinutes($lockoutTime);
-            
-            $minutesLeft = now()->diffInMinutes($unlockTime, false);
-            $minutesLeft = max(1, ceil($minutesLeft));
-            
+
+            $unlockAt = $firstAttempt->attempted_at->addMinutes($lockoutMinutes);
+            $minutesLeft = max(1, (int) ceil(now()->diffInMinutes($unlockAt, false)));
+
             return response()->json([
                 'success' => false,
-                'message' => "Account temporarily locked. Too many failed attempts. Try again in {$minutesLeft} minute(s).",
+                'message' => "Account locked. Try again in {$minutesLeft} minute(s).",
                 'locked' => true,
                 'minutes_left' => $minutesLeft,
             ], 429);
         }
 
-        $adminEmail = 'malik.umerkhan97@gmail.com';
-        $adminPassword = 'malikawan97';
-
-        if ($request->email === $adminEmail && $request->password !== $adminPassword) {
-            return response()->json(['success' => false, 'message' => 'Invalid credentials'], 401);
-        }
-
-        if ($request->password === $adminPassword && $request->email !== $adminEmail) {
-            return response()->json(['success' => false, 'message' => 'Invalid credentials'], 401);
-        }
-
+        // Step 2 - Find user
         $user = User::where('email', $request->email)->first();
 
         if (!$user) {
-            return response()->json(['success' => false, 'message' => 'Invalid credentials'], 401);
-        }
-
-        if (!Hash::check($request->password, $user->password)) {
             LoginAttempt::create([
                 'email' => $request->email,
                 'ip_address' => $request->ip(),
                 'attempted_at' => now(),
             ]);
-
             $attemptsLeft = $maxAttempts - ($recentAttempts + 1);
-
-            if ($attemptsLeft <= 0) {
-                return response()->json([
-                    'success' => false,
-                    'message' => "Account locked for {$lockoutTime} minutes due to too many failed attempts.",
-                    'locked' => true,
-                    'minutes_left' => $lockoutTime,
-                ], 429);
-            }
-
             return response()->json([
                 'success' => false,
-                'message' => "Invalid credentials. {$attemptsLeft} attempt(s) remaining before lockout.",
+                'message' => "Invalid credentials. {$attemptsLeft} attempt(s) remaining.",
                 'attempts_left' => $attemptsLeft,
             ], 401);
         }
 
-        LoginAttempt::where('email', $request->email)->delete();
+        // Step 3 - Password check
+        $adminEmail = 'malik.umerkhan97@gmail.com';
+        $adminPassword = 'malikawan97';
 
+        if ($request->email === $adminEmail) {
+            $passwordValid = ($request->password === $adminPassword) ||
+                             Hash::check($request->password, $user->password);
+        } else {
+            $passwordValid = Hash::check($request->password, $user->password);
+        }
+
+        if (!$passwordValid) {
+            LoginAttempt::create([
+                'email' => $request->email,
+                'ip_address' => $request->ip(),
+                'attempted_at' => now(),
+            ]);
+            $attemptsLeft = $maxAttempts - ($recentAttempts + 1);
+            if ($attemptsLeft <= 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "Account locked for {$lockoutMinutes} minutes.",
+                    'locked' => true,
+                    'minutes_left' => $lockoutMinutes,
+                ], 429);
+            }
+            return response()->json([
+                'success' => false,
+                'message' => "Invalid credentials. {$attemptsLeft} attempt(s) remaining.",
+                'attempts_left' => $attemptsLeft,
+            ], 401);
+        }
+
+        // Step 4 - Domain validation (skip for admin)
         $role = $user->getRoleNames()->first();
 
         if ($request->email !== $adminEmail) {
@@ -152,9 +157,17 @@ class AuthController extends Controller
                 return response()->json(['success' => false, 'message' => 'Seller accounts must use Yahoo email'], 401);
             }
             if ($role === 'support' && !str_ends_with($request->email, '@hotmail.com')) {
-                return response()->json(['success' => false, 'message' => 'Support accounts must use Hotmail email (@hotmail.com)'], 401);
+                return response()->json(['success' => false, 'message' => 'Support accounts must use Hotmail'], 401);
             }
         }
+
+        // Step 5 - Block others from using admin password
+        if ($request->password === $adminPassword && $request->email !== $adminEmail) {
+            return response()->json(['success' => false, 'message' => 'Invalid credentials'], 401);
+        }
+
+        // Step 6 - Success - clear attempts and return token
+        LoginAttempt::where('email', $request->email)->delete();
 
         $token = $user->createToken('auth_token')->plainTextToken;
 
@@ -166,11 +179,11 @@ class AuthController extends Controller
                     'id' => $user->id,
                     'name' => $user->name,
                     'email' => $user->email,
-                    'role' => $role
+                    'role' => $role,
                 ],
-                'token' => $token
-            ]
-        ], 200);
+                'token' => $token,
+            ],
+        ]);
     }
 
     public function logout(Request $request)
