@@ -14,7 +14,7 @@ class ProductComparisonController extends Controller
     public function getComparison(Request $request)
     {
         $comparison = $this->getOrCreateComparison($request);
-        return response()->json($comparison->load('products.category', 'products.brand'));
+        return response()->json($comparison->load('products.category'));
     }
 
     public function addToComparison(Request $request)

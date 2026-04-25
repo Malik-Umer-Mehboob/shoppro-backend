@@ -9,6 +9,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Intervention\Image\Laravel\Facades\Image;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Cache;
+
 
 class ProductController extends Controller
 {
@@ -17,48 +19,60 @@ class ProductController extends Controller
      */
     public function index(Request $request)
     {
-        // Use the sanctum guard explicitly so the user is identified even if 
-        // the middleware is not applied to the route (optional authentication).
+        // Generate a unique cache key based on request parameters
+        $page = $request->get('page', 1);
+        $search = $request->get('search', '');
+        $categoryId = $request->get('category_id', '');
+        $minPrice = $request->get('min_price', '');
+        $maxPrice = $request->get('max_price', '');
+        $status = $request->get('status', '');
+        
         $user = auth('sanctum')->user();
+        $userRole = $user ? $user->getRoleNames()->first() : 'guest';
+        $userId = $user ? $user->id : 'none';
 
-        if ($user && $user->hasRole('admin')) {
-            $query = Product::with(['category', 'images', 'seller']);
-        } elseif ($user && $user->hasRole('seller')) {
-            $query = Product::with(['category', 'images', 'seller'])
-                ->where('seller_id', $user->id);
-        } else {
-            $query = Product::with(['category', 'images', 'seller'])
-                ->where('status', 'published');
-        }
+        $cacheKey = "products_index_{$userRole}_{$userId}_p{$page}_s{$search}_c{$categoryId}_min{$minPrice}_max{$maxPrice}_st{$status}";
 
-        // Apply filters
-        if ($request->has('category_id')) {
-            $query->where('category_id', $request->category_id);
-        }
+        return Cache::remember($cacheKey, now()->addMinutes(30), function () use ($request, $user) {
+            if ($user && $user->hasRole('admin')) {
+                $query = Product::with(['category', 'images', 'seller']);
+            } elseif ($user && $user->hasRole('seller')) {
+                $query = Product::with(['category', 'images', 'seller'])
+                    ->where('seller_id', $user->id);
+            } else {
+                $query = Product::with(['category', 'images', 'seller'])
+                    ->where('status', 'published');
+            }
 
-        if ($request->has('search')) {
-            $query->where('name', 'like', '%' . $request->search . '%');
-        }
+            // Apply filters
+            if ($request->has('category_id')) {
+                $query->where('category_id', $request->category_id);
+            }
 
-        if ($request->has('min_price')) {
-            $query->where('price', '>=', $request->min_price);
-        }
+            if ($request->has('search')) {
+                $query->where('name', 'like', '%' . $request->search . '%');
+            }
 
-        if ($request->has('max_price')) {
-            $query->where('price', '<=', $request->max_price);
-        }
+            if ($request->has('min_price')) {
+                $query->where('price', '>=', $request->min_price);
+            }
 
-        // Allow Admin/Seller to filter by specific status
-        if ($request->has('status') && ($user && ($user->hasRole('admin') || $user->hasRole('seller')))) {
-            $query->where('status', $request->status);
-        }
+            if ($request->has('max_price')) {
+                $query->where('price', '<=', $request->max_price);
+            }
 
-        $products = $query->latest()->paginate(12);
+            // Allow Admin/Seller to filter by specific status
+            if ($request->has('status') && ($user && ($user->hasRole('admin') || $user->hasRole('seller')))) {
+                $query->where('status', $request->status);
+            }
 
-        return response()->json([
-            'success' => true,
-            'data' => $products
-        ]);
+            $products = $query->latest()->paginate(12);
+
+            return response()->json([
+                'success' => true,
+                'data' => $products
+            ]);
+        });
     }
 
     /**
@@ -107,6 +121,9 @@ class ProductController extends Controller
 
         $product = Product::create($validated);
 
+        // Invalidate product cache
+        Cache::flush();
+
         return response()->json([
             'success' => true,
             'message' => 'Product created successfully',
@@ -119,12 +136,14 @@ class ProductController extends Controller
      */
     public function show($id)
     {
-        $product = Product::with(['images', 'category', 'seller:id,name'])->findOrFail($id);
-        
-        return response()->json([
-            'success' => true,
-            'data' => $product
-        ]);
+        return Cache::remember("product_show_{$id}", now()->addHours(1), function () use ($id) {
+            $product = Product::with(['images', 'category', 'seller:id,name'])->findOrFail($id);
+            
+            return response()->json([
+                'success' => true,
+                'data' => $product
+            ]);
+        });
     }
 
     /**
@@ -181,6 +200,10 @@ class ProductController extends Controller
 
         $product->update($validated);
 
+        // Invalidate product cache
+        Cache::forget("product_show_{$id}");
+        Cache::flush();
+
         return response()->json([
             'success' => true,
             'message' => 'Product updated successfully',
@@ -201,6 +224,10 @@ class ProductController extends Controller
         }
 
         $product->delete();
+
+        // Invalidate product cache
+        Cache::forget("product_show_{$id}");
+        Cache::flush();
 
         return response()->json([
             'success' => true,

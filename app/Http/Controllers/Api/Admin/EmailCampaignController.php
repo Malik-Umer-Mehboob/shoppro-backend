@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\EmailCampaign;
 use App\Services\EmailCampaignService;
 use Illuminate\Http\Request;
 
@@ -15,11 +16,67 @@ class EmailCampaignController extends Controller
         $this->campaignService = $campaignService;
     }
 
+    /**
+     * Get campaigns list and global stats.
+     */
     public function index()
     {
+        $campaigns = EmailCampaign::with(['segment'])
+            ->latest()
+            ->get()
+            ->map(function($campaign) {
+                return [
+                    'id' => $campaign->id,
+                    'name' => $campaign->name,
+                    'subject' => $campaign->subject,
+                    'status' => $campaign->status,
+                    'segment_name' => $campaign->segment?->name ?? 'All Users',
+                    'sent_count' => $campaign->sent_count ?? 0,
+                    'open_count' => $campaign->open_count ?? 0,
+                    'click_count' => $campaign->click_count ?? 0,
+                    'revenue' => (float)($campaign->revenue ?? 0),
+                    'scheduled_at' => $campaign->scheduled_at?->format('M d, Y') ?? null,
+                    'created_at' => $campaign->created_at->format('M d, Y'),
+                ];
+            });
+
+        // Calculate real stats from database
+        $totalSent = EmailCampaign::sum('sent_count') ?? 0;
+
+        $avgOpenRate = 0;
+        $avgClickRate = 0;
+        $campaignsWithSent = EmailCampaign::where('sent_count', '>', 0)->get();
+
+        if ($campaignsWithSent->count() > 0) {
+            $avgOpenRate = round(
+                $campaignsWithSent->avg(function($c) {
+                    return $c->sent_count > 0 
+                        ? ($c->open_count / $c->sent_count) * 100 
+                        : 0;
+                }), 1
+            );
+            $avgClickRate = round(
+                $campaignsWithSent->avg(function($c) {
+                    return $c->sent_count > 0 
+                        ? ($c->click_count / $c->sent_count) * 100 
+                        : 0;
+                }), 1
+            );
+        }
+
+        $totalRevenue = (float)(EmailCampaign::sum('revenue') ?? 0);
+
         return response()->json([
             'success' => true,
-            'data'    => \App\Models\EmailCampaign::with('segment')->latest()->get()
+            'data' => [
+                'campaigns' => $campaigns,
+                'stats' => [
+                    'total_sent' => $totalSent,
+                    'avg_open_rate' => $avgOpenRate,
+                    'avg_click_rate' => $avgClickRate,
+                    'total_revenue' => $totalRevenue,
+                ],
+            ],
         ]);
     }
 
@@ -42,7 +99,7 @@ class EmailCampaignController extends Controller
 
     public function show($id)
     {
-        $campaign = \App\Models\EmailCampaign::with(['segment', 'analytics.user'])->findOrFail($id);
+        $campaign = EmailCampaign::with(['segment', 'analytics.user'])->findOrFail($id);
         $analytics = $this->campaignService->getCampaignAnalytics($id);
 
         return response()->json([
@@ -73,5 +130,12 @@ class EmailCampaignController extends Controller
     {
         $campaign = $this->campaignService->sendCampaign($id);
         return response()->json(['success' => true, 'data' => $campaign]);
+    }
+
+    public function destroy($id)
+    {
+        $campaign = EmailCampaign::findOrFail($id);
+        $campaign->delete();
+        return response()->json(['success' => true, 'message' => 'Campaign deleted.']);
     }
 }

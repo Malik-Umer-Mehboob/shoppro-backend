@@ -19,6 +19,10 @@ class EmailCampaign extends Model
         'status',
         'results',
         'language_id',
+        'sent_count',
+        'open_count',
+        'click_count',
+        'revenue',
     ];
 
     public function language()
@@ -29,6 +33,7 @@ class EmailCampaign extends Model
     protected $casts = [
         'scheduled_at' => 'datetime',
         'results'      => 'array',
+        'revenue'      => 'decimal:2',
     ];
 
     public function segment()

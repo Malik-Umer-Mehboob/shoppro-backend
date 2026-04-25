@@ -26,7 +26,15 @@ use App\Http\Controllers\Api\Admin\NewsletterController;
 use App\Http\Controllers\Api\Admin\EmailTemplateController;
 use App\Http\Controllers\Api\KnowledgeBaseController;
 use App\Http\Controllers\Api\SupportAgentController;
+use App\Http\Controllers\Api\ComparisonController;
+
 use App\Http\Controllers\Api\LiveChatController;
+use App\Http\Controllers\Api\GiftCardController;
+use App\Http\Controllers\Api\LoyaltyController;
+use App\Http\Controllers\Api\Admin\SearchAnalyticsController;
+use App\Http\Controllers\Api\Admin\BlogController;
+use App\Http\Controllers\Api\Admin\ProfileController;
+
 
 Route::prefix('auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
@@ -78,10 +86,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/wishlist/{itemId}', [WishlistController::class, 'destroy']);
 
     // Product Comparison
-    Route::get('/comparison', [ProductComparisonController::class, 'getComparison']);
-    Route::post('/comparison', [ProductComparisonController::class, 'addToComparison']);
-    Route::delete('/comparison/{productId}', [ProductComparisonController::class, 'removeFromComparison']);
-    Route::post('/comparison/clear', [ProductComparisonController::class, 'clearComparison']);
+    Route::get('/comparison', [ComparisonController::class, 'index']);
+    Route::post('/comparison', [ComparisonController::class, 'store']);
+    Route::delete('/comparison/{productId}', [ComparisonController::class, 'destroy']);
+    Route::delete('/comparison', [ComparisonController::class, 'clear']);
 
     // Social Auth
     Route::get('/auth/social/{provider}/redirect', [\App\Http\Controllers\Api\SocialAuthController::class, 'redirectToProvider']);
@@ -146,6 +154,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/reports/refunds', [ReportController::class, 'refunds']);
         Route::get('/reports/coupons', [ReportController::class, 'coupons']);
         Route::get('/reports/export', [ReportController::class, 'export']);
+
+        // Search Analytics
+        Route::get('/search-analytics', [SearchAnalyticsController::class, 'index']);
+
+        // Blog Management (Admin)
+        Route::get('/blog/categories', [BlogController::class, 'getCategories']);
+        Route::post('/blog/posts', [BlogController::class, 'store']);
+        Route::get('/blog/posts', [BlogController::class, 'index']);
+        Route::delete('/blog/posts/{id}', [BlogController::class, 'destroy']);
     });
 
     // Admin or Seller
