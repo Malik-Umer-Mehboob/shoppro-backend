@@ -34,6 +34,10 @@ use App\Http\Controllers\Api\LoyaltyController;
 use App\Http\Controllers\Api\Admin\SearchAnalyticsController;
 use App\Http\Controllers\Api\Admin\BlogController;
 use App\Http\Controllers\Api\Admin\ProfileController;
+use App\Http\Controllers\Api\Seller\DashboardController as SellerDashboardController;
+use App\Http\Controllers\Api\Seller\SellerOrderController;
+use App\Http\Controllers\Api\Seller\SellerAnalyticsController;
+use App\Http\Controllers\Api\Seller\SellerProfileController;
 
 
 Route::prefix('auth')->group(function () {
@@ -188,6 +192,13 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Seller
     Route::middleware('seller')->prefix('seller')->group(function () {
+        Route::get('/dashboard', [SellerDashboardController::class, 'stats']);
+        Route::get('/orders', [SellerOrderController::class, 'index']);
+        Route::get('/analytics', [SellerAnalyticsController::class, 'index']);
+        Route::get('/profile', [SellerProfileController::class, 'show']);
+        Route::put('/profile', [SellerProfileController::class, 'update']);
+        Route::post('/profile/avatar', [SellerProfileController::class, 'uploadAvatar']);
+        Route::post('/profile/change-password', [SellerProfileController::class, 'changePassword']);
         Route::get('/reports/sales', [ReportController::class, 'seller']);
     });
 
