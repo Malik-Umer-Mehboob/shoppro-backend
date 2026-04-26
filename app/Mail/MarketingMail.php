@@ -34,6 +34,14 @@ class MarketingMail extends Mailable
             $this->content .= "<img src='{$trackingUrl}' width='1' height='1' style='display:none;' />";
         }
 
+        if ($this->userId) {
+            $user = \App\Models\User::find($this->userId);
+            if ($user) {
+                $unsubscribeUrl = \App\Http\Controllers\Api\NewsletterController::getUnsubscribeUrl($user);
+                $this->content .= "<p style='font-size:12px;color:#666;margin-top:30px;'>Don't want to receive these emails? <a href='{$unsubscribeUrl}'>Unsubscribe here</a></p>";
+            }
+        }
+
         return $email;
     }
 }

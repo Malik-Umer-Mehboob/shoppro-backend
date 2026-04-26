@@ -16,12 +16,16 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
+        'avatar',
+        'is_blocked',
+        'block_reason',
+        'blocked_at',
         'google_id',
         'email_preferences',
         'mobile_number',
         'role',
         'subscribed_to_newsletter',
-        'email_preferences',
+        'unsubscribe_token',
         'referred_by',
     ];
 
@@ -37,7 +41,22 @@ class User extends Authenticatable
             'password'           => 'hashed',
             'email_preferences'         => 'array',
             'subscribed_to_newsletter'  => 'boolean',
+            'is_blocked' => 'boolean',
+            'blocked_at' => 'datetime',
         ];
+    }
+
+    protected static function boot()
+    {
+        parent::boot();
+
+        static::created(function ($user) {
+            if (!$user->unsubscribe_token) {
+                $user->update([
+                    'unsubscribe_token' => \Illuminate\Support\Str::random(64)
+                ]);
+            }
+        });
     }
 
     public function isAdmin(): bool

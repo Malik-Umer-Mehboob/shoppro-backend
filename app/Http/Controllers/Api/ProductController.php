@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Storage;
 use Intervention\Image\Laravel\Facades\Image;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Cache;
+use App\Models\ActivityLog;
 
 
 class ProductController extends Controller
@@ -121,6 +122,11 @@ class ProductController extends Controller
 
         $product = Product::create($validated);
 
+        ActivityLog::log('product.created',
+            "Product '{$product->name}' created",
+            'Product', $product->id
+        );
+
         // Invalidate product cache
         Cache::flush();
 
@@ -136,14 +142,80 @@ class ProductController extends Controller
      */
     public function show($id)
     {
-        return Cache::remember("product_show_{$id}", now()->addHours(1), function () use ($id) {
-            $product = Product::with(['images', 'category', 'seller:id,name'])->findOrFail($id);
-            
-            return response()->json([
-                'success' => true,
-                'data' => $product
-            ]);
-        });
+        $product = Product::with([
+            'category', 'images', 'seller:id,name',
+            'variants', 'reviews'
+        ])->findOrFail($id);
+
+        $avgRating = $product->reviews()
+            ->where('is_approved', true)->avg('rating');
+        $reviewCount = $product->reviews()
+            ->where('is_approved', true)->count();
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'id' => $product->id,
+                'name' => $product->name,
+                'slug' => $product->slug,
+                'description' => $product->description,
+                'short_description' => $product->short_description,
+                'price' => $product->price,
+                'sale_price' => $product->sale_price,
+                'sku' => $product->sku,
+                'stock_quantity' => $product->stock_quantity,
+                'status' => $product->status,
+                'thumbnail' => $product->thumbnail
+                    ? asset('storage/' . $product->thumbnail)
+                    : null,
+                'category' => $product->category?->name,
+                'seller' => $product->seller?->name,
+                'images' => $product->images->map(fn($img) => [
+                    'id' => $img->id,
+                    'url' => asset('storage/' . $img->image_path),
+                    'is_primary' => $img->is_primary,
+                ]),
+                'variants' => $product->variants,
+                'average_rating' => round($avgRating ?? 0, 1),
+                'review_count' => $reviewCount,
+                // SEO fields
+                'seo' => [
+                    'title' => $product->name . ' | ShopPro',
+                    'description' => $product->short_description
+                        ?? substr(strip_tags($product->description ?? ''), 0, 160),
+                    'keywords' => implode(', ', array_filter([
+                        $product->name,
+                        $product->category?->name,
+                        $product->sku,
+                    ])),
+                    'og_image' => $product->thumbnail
+                        ? asset('storage/' . $product->thumbnail)
+                        : null,
+                    'canonical_url' => env('FRONTEND_URL', 'http://localhost:5173')
+                        . '/products/' . $product->id,
+                    'schema' => [
+                        '@context' => 'https://schema.org',
+                        '@type' => 'Product',
+                        'name' => $product->name,
+                        'description' => $product->short_description,
+                        'sku' => $product->sku,
+                        'offers' => [
+                            '@type' => 'Offer',
+                            'price' => $product->sale_price ?? $product->price,
+                            'priceCurrency' => 'PKR',
+                            'availability' => $product->stock_quantity > 0
+                                ? 'https://schema.org/InStock'
+                                : 'https://schema.org/OutOfStock',
+                        ],
+                        'aggregateRating' => $reviewCount > 0 ? [
+                            '@type' => 'AggregateRating',
+                            'ratingValue' => round($avgRating, 1),
+                            'reviewCount' => $reviewCount,
+                        ] : null,
+                    ],
+                ],
+            ]
+        ]);
     }
 
     /**
@@ -224,6 +296,11 @@ class ProductController extends Controller
         }
 
         $product->delete();
+
+        ActivityLog::log('product.deleted',
+            "Product deleted",
+            'Product', $id
+        );
 
         // Invalidate product cache
         Cache::forget("product_show_{$id}");
@@ -312,23 +389,30 @@ class ProductController extends Controller
      */
     public function updateStatus(Request $request, $id)
     {
+        $user = auth()->user();
         $product = Product::findOrFail($id);
 
-        if (!$request->user()->isAdmin() && $product->seller_id !== $request->user()->id) {
-            return response()->json(['message' => 'Unauthorized'], 403);
+        // Seller can only update own products
+        if ($user->hasRole('seller') && $product->seller_id !== $user->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized',
+            ], 403);
         }
 
         $request->validate([
-            'status' => 'required|in:draft,published,archived'
+            'status' => 'required|in:draft,published,archived',
         ]);
 
-        $product->status = $request->status;
-        $product->save();
+        $product->update(['status' => $request->status]);
 
         return response()->json([
             'success' => true,
-            'message' => 'Status updated successfully',
-            'data' => $product
+            'message' => "Product status updated to {$request->status}",
+            'data' => [
+                'id' => $product->id,
+                'status' => $product->status,
+            ]
         ]);
     }
 

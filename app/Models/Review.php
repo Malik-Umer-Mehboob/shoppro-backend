@@ -15,6 +15,8 @@ class Review extends Model
         'comment',
         'photos',
         'verified_purchase',
+        'is_approved',
+        'approved_at',
         'status',
         'upvotes',
         'downvotes',
@@ -29,6 +31,8 @@ class Review extends Model
     protected $casts = [
         'photos'            => 'array',
         'verified_purchase' => 'boolean',
+        'is_approved'       => 'boolean',
+        'approved_at'       => 'datetime',
         'rating'            => 'integer',
         'upvotes'           => 'integer',
         'downvotes'         => 'integer',

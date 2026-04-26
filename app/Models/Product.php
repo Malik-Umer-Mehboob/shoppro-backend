@@ -140,4 +140,11 @@ class Product extends Model
     {
         return $this->approvedReviews()->count();
     }
+
+    public function warehouses()
+    {
+        return $this->belongsToMany(Warehouse::class, 'product_warehouse')
+            ->withPivot('quantity', 'reserved_quantity')
+            ->withTimestamps();
+    }
 }

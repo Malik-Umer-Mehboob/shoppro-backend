@@ -27,6 +27,18 @@ use App\Http\Controllers\Api\Admin\EmailTemplateController;
 use App\Http\Controllers\Api\KnowledgeBaseController;
 use App\Http\Controllers\Api\SupportAgentController;
 use App\Http\Controllers\Api\ComparisonController;
+use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\ShippingController;
+use App\Http\Controllers\Api\DeviceController;
+use App\Http\Controllers\Api\Admin\UserController as AdminUserController;
+use App\Http\Controllers\Api\ReviewController;
+use App\Http\Controllers\Api\Admin\RiderController;
+use App\Http\Controllers\Api\Rider\RiderDashboardController;
+use App\Http\Controllers\Api\Admin\WarehouseController;
+use App\Http\Controllers\Api\CouponController;
+use App\Http\Controllers\Api\ReturnController;
+use App\Http\Controllers\Api\NewsletterController as PublicNewsletterController;
+use App\Http\Controllers\Api\Customer\ProfileController as CustomerProfileController;
 
 use App\Http\Controllers\Api\LiveChatController;
 use App\Http\Controllers\Api\GiftCardController;
@@ -56,6 +68,8 @@ Route::get('/products', [ProductController::class, 'index']);
 Route::get('/products/{id}', [ProductController::class, 'show']);
 Route::get('/wishlist/shared/{token}', [WishlistController::class, 'showPublic']);
 Route::get('/products/{id}/variants', [ProductVariantController::class, 'index']);
+Route::get('/products/{id}/reviews', [ReviewController::class, 'index']);
+Route::middleware('auth:sanctum')->post('/products/{id}/reviews', [ReviewController::class, 'store']);
 
 // Cart routes (Guest & Auth)
 Route::get('/cart', [CartController::class, 'show']);
@@ -69,6 +83,10 @@ Route::post('/cart/coupon', [CartController::class, 'applyCoupon']);
 Route::get('/search', [SearchController::class, 'search']);
 Route::get('/search/autocomplete', [SearchController::class, 'autocomplete']);
 
+// Newsletter routes (public)
+Route::get('/newsletter/unsubscribe/{token}', [PublicNewsletterController::class, 'unsubscribeByToken']);
+Route::get('/newsletter/resubscribe/{token}', [PublicNewsletterController::class, 'resubscribeByToken']);
+
 // Knowledge Base routes (public)
 Route::get('/kb', [KnowledgeBaseController::class, 'index']);
 Route::get('/kb/{slug}', [KnowledgeBaseController::class, 'show']);
@@ -76,6 +94,10 @@ Route::post('/kb/{id}/vote', [KnowledgeBaseController::class, 'vote']);
 
 // Public support tools
 Route::post('/support/order-lookup', [SupportAgentController::class, 'orderLookup']);
+
+// Public shipping routes
+Route::get('/shipping/zones', [ShippingController::class, 'zones']);
+Route::post('/shipping/calculate', [ShippingController::class, 'calculate']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('auth')->group(function () {
@@ -115,12 +137,37 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user/orders', [UserOrderController::class, 'index']);
     Route::get('/user/orders/{id}', [UserOrderController::class, 'show']);
     Route::post('/user/orders/{id}/refund-request', [UserOrderController::class, 'requestRefund']);
+    Route::post('/orders/{id}/cancel', [OrderController::class, 'cancel']);
+    Route::get('/orders/{id}/can-cancel', [OrderController::class, 'canCancel']);
+
+    // Payment routes
+    Route::post('/orders/{id}/payment', [PaymentController::class, 'process']);
+    Route::get('/orders/{id}/payment/status', [PaymentController::class, 'status']);
 
     // User: addresses
     Route::get('/user/addresses', [UserAddressController::class, 'index']);
     Route::post('/user/addresses', [UserAddressController::class, 'store']);
     Route::put('/user/addresses/{id}', [UserAddressController::class, 'update']);
     Route::delete('/user/addresses/{id}', [UserAddressController::class, 'destroy']);
+
+    // Customer Returns
+    Route::get('/returns', [ReturnController::class, 'index']);
+    Route::post('/returns', [ReturnController::class, 'store']);
+
+    // Customer Profile
+    Route::prefix('customer')->group(function () {
+        Route::get('/profile', [CustomerProfileController::class, 'show']);
+        Route::put('/profile', [CustomerProfileController::class, 'update']);
+        Route::post('/profile/avatar', [CustomerProfileController::class, 'uploadAvatar']);
+        Route::post('/profile/change-password', [CustomerProfileController::class, 'changePassword']);
+        Route::post('/profile/newsletter', [CustomerProfileController::class, 'updateNewsletterPreference']);
+    });
+
+    // Checkout & Shipping
+    Route::post('/checkout', [CheckoutController::class, 'store']);
+    Route::post('/coupons/validate', [CouponController::class, 'validate']);
+    Route::get('/shipping/zones', [ShippingController::class, 'zones']);
+    Route::post('/shipping/calculate', [ShippingController::class, 'calculate']);
 
     // Invoice (accessible by owner, admin, seller — controller enforces auth)
     Route::get('/orders/{id}/invoice', [InvoiceController::class, 'show']);
@@ -137,6 +184,20 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user/notification-preferences', [NotificationPreferenceController::class, 'show']);
     Route::put('/user/notification-preferences', [NotificationPreferenceController::class, 'update']);
 
+    // Device Management
+    Route::prefix('devices')->group(function () {
+        Route::get('/', [DeviceController::class, 'index']);
+        Route::delete('/{tokenId}', [DeviceController::class, 'destroy']);
+        Route::post('/logout-all-others', [DeviceController::class, 'logoutAllOthers']);
+        Route::post('/logout-all', [DeviceController::class, 'logoutAll']);
+    });
+
+    // Rider routes
+    Route::middleware(['rider'])->prefix('rider')->group(function () {
+        Route::get('/dashboard', [RiderDashboardController::class, 'stats']);
+        Route::patch('/assignments/{id}/status', [RiderDashboardController::class, 'updateStatus']);
+    });
+
     // Admin-only
     Route::middleware('admin')->prefix('admin')->group(function () {
         Route::get('/products/low-stock', [ProductController::class, 'getLowStockProducts']);
@@ -145,6 +206,22 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Admin refund processing
         Route::post('/orders/{id}/refund', [OrderController::class, 'refund']);
+
+        // Admin payment management
+        Route::post('/orders/{id}/payment/mark-paid', [PaymentController::class, 'markPaid']);
+        Route::post('/orders/{id}/payment/refund', [PaymentController::class, 'refund']);
+
+        // Admin returns
+        Route::get('/returns', [ReturnController::class, 'adminIndex']);
+        Route::post('/returns/{id}/approve', [ReturnController::class, 'approve']);
+        Route::post('/returns/{id}/reject', [ReturnController::class, 'reject']);
+        Route::post('/returns/{id}/refunded', [ReturnController::class, 'markRefunded']);
+
+        // Admin shipping management
+        Route::get('/shipping/zones', [ShippingController::class, 'index']);
+        Route::post('/shipping/zones', [ShippingController::class, 'store']);
+        Route::put('/shipping/zones/{id}', [ShippingController::class, 'update']);
+        Route::delete('/shipping/zones/{id}', [ShippingController::class, 'destroy']);
 
         // Search analytics
         Route::get('/search/top', [SearchController::class, 'topSearches']);
@@ -167,6 +244,31 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/blog/posts', [BlogController::class, 'store']);
         Route::get('/blog/posts', [BlogController::class, 'index']);
         Route::delete('/blog/posts/{id}', [BlogController::class, 'destroy']);
+
+        // User Management (Admin)
+        Route::get('/users', [AdminUserController::class, 'index']);
+        Route::get('/users/{id}', [AdminUserController::class, 'show']);
+        Route::post('/users/{id}/block', [AdminUserController::class, 'block']);
+        Route::post('/users/{id}/unblock', [AdminUserController::class, 'unblock']);
+
+        // Review Moderation (Admin)
+        Route::get('/reviews', [ReviewController::class, 'adminIndex']);
+        Route::post('/reviews/{id}/approve', [ReviewController::class, 'approve']);
+        Route::delete('/reviews/{id}/reject', [ReviewController::class, 'reject']);
+
+        // Rider Management (Admin)
+        Route::get('/riders', [RiderController::class, 'getRiders']);
+        Route::post('/orders/{id}/assign-rider', [RiderController::class, 'assignRider']);
+        Route::get('/rider-assignments', [RiderController::class, 'assignments']);
+
+        // Activity Logs
+        Route::get('/activity-logs', [\App\Http\Controllers\Api\Admin\ActivityLogController::class, 'index']);
+        Route::get('/activity-logs/stats', [\App\Http\Controllers\Api\Admin\ActivityLogController::class, 'stats']);
+
+        // Warehouse Management (Admin)
+        Route::apiResource('warehouses', WarehouseController::class);
+        Route::get('/warehouses/{id}/stock', [WarehouseController::class, 'stock']);
+        Route::patch('/warehouses/{warehouseId}/stock/{productId}', [WarehouseController::class, 'updateStock']);
     });
 
     // Admin or Seller
@@ -229,7 +331,11 @@ Route::middleware('auth:sanctum')->group(function () {
     // Email Preferences
     Route::get('/email-preferences', [EmailPreferenceController::class, 'show']);
     Route::put('/email-preferences', [EmailPreferenceController::class, 'update']);
-    Route::post('/newsletter/unsubscribe', [EmailPreferenceController::class, 'unsubscribe']);
+    Route::post('/email-preferences/unsubscribe', [EmailPreferenceController::class, 'unsubscribe']);
+
+    // Newsletter Subscriptions
+    Route::post('/newsletter/subscribe', [PublicNewsletterController::class, 'subscribe']);
+    Route::post('/newsletter/unsubscribe', [PublicNewsletterController::class, 'unsubscribe']);
 
     // Admin Email Marketing
     Route::middleware(['admin_or_support'])->prefix('admin')->group(function () {

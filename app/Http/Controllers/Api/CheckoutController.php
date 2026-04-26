@@ -4,65 +4,174 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Cart;
+use App\Models\CouponUsage;
 use App\Models\Order;
-use App\Services\OrderService;
-use App\Services\PaymentService;
+use App\Models\OrderItem;
+use App\Models\ShippingZone;
+use App\Models\Coupon;
 use Illuminate\Http\Request;
 
 class CheckoutController extends Controller
 {
-    public function __construct(
-        private OrderService $orderService,
-        private PaymentService $paymentService
-    ) {}
-
     public function store(Request $request)
     {
+        $user = auth()->user();
+
         $request->validate([
-            'shipping_address'            => 'required|array',
-            'shipping_address.full_name'  => 'required|string',
-            'shipping_address.phone'      => 'required|string',
-            'shipping_address.address_line_1' => 'required|string',
-            'shipping_address.city'       => 'required|string',
-            'shipping_address.state'      => 'required|string',
-            'shipping_address.country'    => 'required|string',
-            'shipping_address.postal_code'=> 'required|string',
-            'payment_method'              => 'required|in:stripe,paypal,cod',
-            'payment_intent_id'           => 'nullable|string',
+            'shipping_address'                  => 'required|array',
+            'shipping_address.full_name'        => 'required|string',
+            'shipping_address.phone'            => 'required|string',
+            'shipping_address.address_line_1'   => 'required|string',
+            'shipping_address.city'             => 'required|string',
+            'shipping_address.country'          => 'required|string',
+            'payment_method'                    => 'required|in:cod,bank_transfer,stripe',
+            'reference_number'                  => 'required_if:payment_method,bank_transfer|nullable|string',
+            'coupon_code'                       => 'nullable|string',
+            'notes'                             => 'nullable|string',
         ]);
 
-        $user = $request->user();
-
-        // Get user's active cart
-        $cart = Cart::where('user_id', $user->id)
-            ->where('status', 'active')
-            ->with(['items.product', 'items.variant'])
+        // Get cart items
+        $cart = Cart::with(['items.product', 'items.variant'])
+            ->where('user_id', $user->id)
             ->first();
 
         if (!$cart || $cart->items->isEmpty()) {
-            return response()->json(['message' => 'Your cart is empty.'], 422);
+            return response()->json([
+                'success' => false,
+                'message' => 'Your cart is empty',
+            ], 422);
         }
 
-        $paymentData = $request->only(['payment_intent_id', 'paypal_order_id']);
+        // Calculate shipping
+        $shippingZone = ShippingZone::where('city', $request->shipping_address['city'])
+            ->where('is_active', true)
+            ->first();
 
-        $order = $this->orderService->createFromCart(
-            $cart,
-            $request->input('shipping_address'),
-            $request->input('payment_method'),
-            $paymentData['payment_intent_id'] ?? null
-        );
+        $shippingCost = $shippingZone?->delivery_charge ?? 350;
 
-        // Process payment if not COD
-        if ($order->payment_method !== 'cod') {
-            $result = $this->paymentService->processPayment($order, $paymentData);
-            if (!$result['success']) {
-                return response()->json(['message' => $result['message']], 422);
+        // Calculate subtotal
+        $subtotal = $cart->items->sum(function ($item) {
+            $price = $item->variant?->price ?? $item->product->sale_price
+                ?? $item->product->price;
+            return $price * $item->quantity;
+        });
+
+        // Apply coupon if provided
+        $discount      = 0;
+        $couponCode    = null;
+        $appliedCoupon = null;
+
+        if ($request->coupon_code) {
+            $coupon = Coupon::where('code', $request->coupon_code)->first();
+
+            if (!$coupon) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid coupon code',
+                ], 422);
             }
+
+            $validation = $coupon->isValidForUser($user->id, $subtotal);
+
+            if (!$validation['valid']) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $validation['message'],
+                ], 422);
+            }
+
+            $discount      = $coupon->calculateDiscount($subtotal);
+            $couponCode    = $coupon->code;
+            $appliedCoupon = $coupon;
         }
+
+        // Tax (0 for now)
+        $tax        = 0;
+        $grandTotal = $subtotal + $shippingCost - $discount + $tax;
+
+        // Create order
+        $order = Order::create([
+            'user_id'        => $user->id,
+            'status'         => 'pending',
+            'shipping_address' => $request->shipping_address,
+            'payment_method' => $request->payment_method,
+            'payment_status' => 'pending',
+            'subtotal'       => $subtotal,
+            'shipping_cost'  => $shippingCost,
+            'discount'       => $discount,
+            'tax'            => $tax,
+            'grand_total'    => $grandTotal,
+            'coupon_code'    => $couponCode,
+            'notes'          => $request->notes,
+        ]);
+
+        // Create order items + deduct stock
+        foreach ($cart->items as $item) {
+            $price = $item->variant?->price ?? $item->product->sale_price
+                ?? $item->product->price;
+
+            OrderItem::create([
+                'order_id'   => $order->id,
+                'product_id' => $item->product_id,
+                'variant_id' => $item->variant_id,
+                'name'       => $item->product->name,
+                'quantity'   => $item->quantity,
+                'price'      => $price,
+                'total'      => $price * $item->quantity,
+            ]);
+
+            $item->product->decrement('stock_quantity', $item->quantity);
+        }
+
+        // Record coupon usage and increment global used count
+        if ($appliedCoupon) {
+            CouponUsage::create([
+                'coupon_id' => $appliedCoupon->id,
+                'user_id'   => $user->id,
+                'order_id'  => $order->id,
+                'used_at'   => now(),
+            ]);
+
+            $appliedCoupon->increment('used_count');
+        }
+
+        // Process payment method
+        if ($request->payment_method === 'bank_transfer') {
+            $order->update([
+                'payment_id'    => $request->reference_number,
+                'payment_notes' => 'Awaiting bank transfer verification. Ref: '
+                    . $request->reference_number,
+            ]);
+        } else {
+            $order->update([
+                'payment_notes' => 'Cash to be collected on delivery',
+            ]);
+        }
+
+        // Clear cart
+        $cart->items()->delete();
 
         return response()->json([
-            'message' => 'Order placed successfully.',
-            'order'   => $order->load(['items.product', 'invoice']),
-        ], 201);
+            'success' => true,
+            'message' => 'Order placed successfully!',
+            'data'    => [
+                'order_id'           => $order->id,
+                'order_number'       => '#' . str_pad($order->id, 4, '0', STR_PAD_LEFT),
+                'grand_total'        => $grandTotal,
+                'payment_method'     => $request->payment_method,
+                'payment_status'     => 'pending',
+                'estimated_delivery' => $shippingZone
+                    ? $shippingZone->estimated_days . ' business days'
+                    : '5-7 business days',
+                'bank_details' => $request->payment_method === 'bank_transfer' ? [
+                    'bank_name'      => 'HBL Bank',
+                    'account_title'  => 'ShopPro Pvt Ltd',
+                    'account_number' => '1234-5678-9012',
+                    'iban'           => 'PK36HABB0000001234567890',
+                    'amount'         => 'Rs. ' . number_format($grandTotal, 2),
+                    'reference'      => 'Order ' . '#' . str_pad($order->id, 4, '0', STR_PAD_LEFT),
+                ] : null,
+            ],
+        ]);
     }
 }

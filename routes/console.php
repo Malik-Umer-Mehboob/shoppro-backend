@@ -9,3 +9,4 @@ Artisan::command('inspire', function () {
 
 \Illuminate\Support\Facades\Schedule::command('check:low-stock')->daily();
 \Illuminate\Support\Facades\Schedule::job(new \App\Jobs\SendScheduledMarketingJob)->hourly();
+\Illuminate\Support\Facades\Schedule::command('sitemap:generate')->daily();

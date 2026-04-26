@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\PasswordResetOtp;
+use App\Models\ActivityLog;
 use App\Mail\OtpMail;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -21,7 +22,7 @@ class AuthController extends Controller
             'name' => 'required|string',
             'email' => 'required|email|unique:users,email',
             'password' => 'required|string|min:8',
-            'role' => 'required|string|in:customer,seller,support',
+            'role' => 'required|string|in:customer,seller,support,rider',
         ]);
 
         if ($request->role === 'customer' && !str_ends_with($request->email, '@gmail.com')) {
@@ -34,6 +35,13 @@ class AuthController extends Controller
 
         if ($request->role === 'support' && !str_ends_with($request->email, '@hotmail.com')) {
             return response()->json(['success' => false, 'message' => 'Support staff must register with Hotmail (@hotmail.com)'], 400);
+        }
+
+        if ($request->role === 'rider' && !str_ends_with($request->email, '@rider.com')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Riders must register with @rider.com email',
+            ], 422);
         }
 
         if ($request->role === 'admin') {
@@ -99,6 +107,15 @@ class AuthController extends Controller
         // Step 2 - Find user
         $user = User::where('email', $request->email)->first();
 
+        // Check if user is blocked
+        if ($user && $user->is_blocked) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Your account has been blocked. Reason: ' . ($user->block_reason ?? 'Contact support for details'),
+                'blocked' => true,
+            ], 403);
+        }
+
         if (!$user) {
             LoginAttempt::create([
                 'email' => $request->email,
@@ -159,6 +176,12 @@ class AuthController extends Controller
             if ($role === 'support' && !str_ends_with($request->email, '@hotmail.com')) {
                 return response()->json(['success' => false, 'message' => 'Support accounts must use Hotmail'], 401);
             }
+            if ($role === 'rider' && !str_ends_with($request->email, '@rider.com')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Rider accounts must use @rider.com email',
+                ], 401);
+            }
         }
 
         // Step 5 - Block others from using admin password
@@ -169,7 +192,22 @@ class AuthController extends Controller
         // Step 6 - Success - clear attempts and return token
         LoginAttempt::where('email', $request->email)->delete();
 
-        $token = $user->createToken('auth_token')->plainTextToken;
+        ActivityLog::log('auth.login', "User {$user->name} logged in");
+
+        $deviceName = $request->header('User-Agent', 'Unknown Device');
+        $deviceType = $this->detectDeviceType($request->header('User-Agent', ''));
+
+        $tokenResult = $user->createToken($deviceName);
+        $token = $tokenResult->plainTextToken;
+
+        // Save device info to token
+        $tokenResult->accessToken->forceFill([
+            'device_name' => substr($deviceName, 0, 100),
+            'device_type' => $deviceType,
+            'ip_address' => $request->ip(),
+            'user_agent' => substr($request->header('User-Agent', ''), 0, 255),
+            'last_used_at' => now(),
+        ])->save();
 
         return response()->json([
             'success' => true,
@@ -188,6 +226,7 @@ class AuthController extends Controller
 
     public function logout(Request $request)
     {
+        ActivityLog::log('auth.logout', "User logged out");
         $request->user()->currentAccessToken()->delete();
         return response()->json(['success' => true, 'message' => 'Logged out successfully']);
     }
@@ -294,45 +333,77 @@ class AuthController extends Controller
 
     public function redirectToGoogle()
     {
-        /** @var \Laravel\Socialite\Two\GoogleProvider $driver */
-        $driver = Socialite::driver('google');
-        return $driver->stateless()->redirect();
+        $url = Socialite::driver('google')
+            ->stateless()
+            ->redirect()
+            ->getTargetUrl();
+
+        return response()->json([
+            'success' => true,
+            'url' => $url,
+        ]);
     }
 
     public function handleGoogleCallback()
     {
-        /** @var \Laravel\Socialite\Two\GoogleProvider $driver */
-        $driver = Socialite::driver('google');
-        $googleUser = $driver->stateless()->user();
+        try {
+            $googleUser = Socialite::driver('google')
+                ->stateless()
+                ->user();
 
-        $user = User::where('google_id', $googleUser->id)
-            ->orWhere('email', $googleUser->email)
-            ->first();
+            $user = User::where('google_id', $googleUser->getId())
+                ->orWhere('email', $googleUser->getEmail())
+                ->first();
 
-        if (!$user) {
-            $user = User::create([
-                'name' => $googleUser->name,
-                'email' => $googleUser->email,
-                'google_id' => $googleUser->id,
-                'password' => Hash::make(Str::random(32)),
-            ]);
-            $user->assignRole('customer');
-        } elseif (!$user->google_id) {
-            $user->google_id = $googleUser->id;
-            $user->save();
+            if (!$user) {
+                $user = User::create([
+                    'name' => $googleUser->getName(),
+                    'email' => $googleUser->getEmail(),
+                    'google_id' => $googleUser->getId(),
+                    'password' => Hash::make(Str::random(32)),
+                    'email_verified_at' => now(),
+                ]);
+                $user->assignRole('customer');
+            } else {
+                if (!$user->google_id) {
+                    $user->update(['google_id' => $googleUser->getId()]);
+                }
+            }
+
+            $role = $user->getRoleNames()->first();
+            $token = $user->createToken('google_auth')->plainTextToken;
+
+            $userData = [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $role,
+                'avatar' => $user->avatar 
+                    ? asset('storage/' . $user->avatar) 
+                    : null,
+            ];
+
+            $encodedUser = base64_encode(json_encode($userData));
+
+            return redirect(
+                env('FRONTEND_URL', 'http://localhost:5173') . 
+                '/auth/google/callback?token=' . $token . 
+                '&user=' . $encodedUser
+            );
+
+        } catch (\Exception $e) {
+            return redirect(
+                env('FRONTEND_URL', 'http://localhost:5173') . 
+                '/login?error=google_failed'
+            );
         }
+    }
 
-        $token = $user->createToken('auth_token')->plainTextToken;
-
-        $userData = [
-            'id' => $user->id,
-            'name' => $user->name,
-            'email' => $user->email,
-            'role' => $user->getRoleNames()->first()
-        ];
-
-        $encodedUser = base64_encode(json_encode($userData));
-
-        return redirect("http://localhost:5173/auth/google/callback?token={$token}&user={$encodedUser}");
+    private function detectDeviceType(string $userAgent): string
+    {
+        $userAgent = strtolower($userAgent);
+        if (str_contains($userAgent, 'mobile')) return 'mobile';
+        if (str_contains($userAgent, 'tablet')) return 'tablet';
+        return 'desktop';
     }
 }

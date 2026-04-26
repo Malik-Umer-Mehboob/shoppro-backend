@@ -8,6 +8,7 @@ use App\Models\Invoice;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
+use App\Models\ShippingZone;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Api\LoyaltyController;
 
@@ -40,12 +41,16 @@ class OrderService
                 'payment_method'   => $paymentMethod,
                 'payment_id'       => $paymentId,
                 'payment_status'   => $paymentMethod === 'cod' ? Order::PAYMENT_PENDING : Order::PAYMENT_PAID,
-                'shipping_cost'    => $cart->shipping_amount ?? 0,
+                'shipping_cost'    => $this->calculateShipping($shippingAddress['city'] ?? 'Other'),
                 'tax'              => $cart->tax_amount ?? 0,
                 'coupon_code'      => $cart->coupon_code,
                 'discount'         => $cart->discount_amount ?? 0,
-                'grand_total'      => $cart->total,
+                'grand_total'      => 0, // Will calculate below
             ]);
+
+            // Calculate grand total after shipping cost is set
+            $order->grand_total = ($order->subtotal + $order->shipping_cost + $order->tax) - $order->discount;
+            $order->save();
 
             // Create order items & reduce inventory
             foreach ($cart->items as $item) {
@@ -117,4 +122,21 @@ class OrderService
             }
         }
     }
+
+    /**
+     * Calculate shipping cost based on city.
+     */
+    private function calculateShipping(string $city): float
+    {
+        $zone = ShippingZone::where('is_active', true)
+            ->where('city', $city)
+            ->first();
+
+        if (!$zone) {
+            $zone = ShippingZone::where('city', 'Other')->first();
+        }
+
+        return (float) ($zone->delivery_charge ?? 350.00);
+    }
 }
+

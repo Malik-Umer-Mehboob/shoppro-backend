@@ -1,112 +1,76 @@
 <?php
-
 namespace App\Services;
 
 use App\Models\Order;
 
 class PaymentService
 {
-    /**
-     * Process payment for an order.
-     * For COD: no processing needed, just mark as pending.
-     * For Stripe/PayPal: integrate actual gateway here.
-     */
-    public function processPayment(Order $order, array $paymentData = []): array
+    public function processCOD(Order $order): array
     {
-        if ($order->payment_method === 'cod') {
-            return ['success' => true, 'message' => 'Cash on delivery order placed.'];
-        }
-
-        if ($order->payment_method === 'stripe') {
-            return $this->processStripePayment($order, $paymentData);
-        }
-
-        if ($order->payment_method === 'paypal') {
-            return $this->processPayPalPayment($order, $paymentData);
-        }
-
-        return ['success' => false, 'message' => 'Unsupported payment method.'];
-    }
-
-    /**
-     * Process a refund for an order.
-     */
-    public function processRefund(Order $order): array
-    {
-        if ($order->payment_method === 'cod') {
-            // For COD: manual refund — just update status
-            $order->update([
-                'status'         => Order::STATUS_REFUNDED,
-                'payment_status' => Order::PAYMENT_REFUNDED,
-            ]);
-            return ['success' => true, 'message' => 'COD refund processed manually.'];
-        }
-
-        if ($order->payment_method === 'stripe' && $order->payment_id) {
-            return $this->processStripeRefund($order);
-        }
-
-        // Generic fallback
         $order->update([
-            'status'         => Order::STATUS_REFUNDED,
-            'payment_status' => Order::PAYMENT_REFUNDED,
+            'payment_method' => 'cod',
+            'payment_status' => 'pending',
+            'payment_notes' => 'Cash to be collected on delivery',
         ]);
 
-        return ['success' => true, 'message' => 'Refund processed.'];
+        return [
+            'success' => true,
+            'message' => 'Order placed successfully. Pay on delivery.',
+            'payment_method' => 'cod',
+            'payment_status' => 'pending',
+        ];
     }
 
-    // ---------------------
-    // Private Stripe Methods
-    // ---------------------
-
-    private function processStripePayment(Order $order, array $paymentData): array
+    public function processBankTransfer(Order $order, string $referenceNumber): array
     {
-        try {
-            $stripeSecret = config('services.stripe.secret');
-            if (!$stripeSecret) {
-                return ['success' => false, 'message' => 'Stripe not configured.'];
-            }
-
-            // Stripe payment intent confirmation would go here when Stripe SDK is added
-            // \Stripe\Stripe::setApiKey($stripeSecret);
-            // $paymentIntent = \Stripe\PaymentIntent::retrieve($paymentData['payment_intent_id']);
-
-            $order->update([
-                'payment_id'     => $paymentData['payment_intent_id'] ?? null,
-                'payment_status' => Order::PAYMENT_PAID,
-            ]);
-
-            return ['success' => true, 'message' => 'Stripe payment confirmed.'];
-        } catch (\Exception $e) {
-            return ['success' => false, 'message' => $e->getMessage()];
-        }
-    }
-
-    private function processStripeRefund(Order $order): array
-    {
-        try {
-            // \Stripe\Stripe::setApiKey(config('services.stripe.secret'));
-            // \Stripe\Refund::create(['payment_intent' => $order->payment_id]);
-
-            $order->update([
-                'status'         => Order::STATUS_REFUNDED,
-                'payment_status' => Order::PAYMENT_REFUNDED,
-            ]);
-
-            return ['success' => true, 'message' => 'Stripe refund processed.'];
-        } catch (\Exception $e) {
-            return ['success' => false, 'message' => $e->getMessage()];
-        }
-    }
-
-    private function processPayPalPayment(Order $order, array $paymentData): array
-    {
-        // PayPal integration stub
         $order->update([
-            'payment_id'     => $paymentData['paypal_order_id'] ?? null,
-            'payment_status' => Order::PAYMENT_PAID,
+            'payment_method' => 'bank_transfer',
+            'payment_status' => 'pending',
+            'payment_id' => $referenceNumber,
+            'payment_notes' => 'Awaiting bank transfer verification',
         ]);
 
-        return ['success' => true, 'message' => 'PayPal payment confirmed.'];
+        return [
+            'success' => true,
+            'message' => 'Order placed. Please transfer amount to our bank account.',
+            'payment_method' => 'bank_transfer',
+            'payment_status' => 'pending',
+            'bank_details' => [
+                'bank_name' => 'HBL Bank',
+                'account_title' => 'ShopPro Pvt Ltd',
+                'account_number' => '1234-5678-9012',
+                'iban' => 'PK36HABB0000001234567890',
+                'reference' => 'Order #' . str_pad($order->id, 4, '0', STR_PAD_LEFT),
+            ],
+        ];
+    }
+
+    public function markAsPaid(Order $order, string $paymentId = null): array
+    {
+        $order->update([
+            'payment_status' => 'paid',
+            'payment_id' => $paymentId ?? $order->payment_id,
+        ]);
+
+        return ['success' => true, 'message' => 'Payment marked as paid'];
+    }
+
+    public function processRefund(Order $order, string $reason = null): array
+    {
+        $order->update([
+            'payment_status' => 'refunded',
+            'payment_notes' => $reason ?? 'Refund processed by admin',
+        ]);
+
+        return ['success' => true, 'message' => 'Refund processed successfully'];
+    }
+
+    public function getStripeIntent(Order $order): array
+    {
+        // Stripe placeholder - ready for future integration
+        return [
+            'success' => false,
+            'message' => 'Stripe integration coming soon',
+        ];
     }
 }

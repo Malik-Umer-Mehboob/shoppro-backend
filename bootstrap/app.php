@@ -25,6 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'admin_or_support' => \App\Http\Middleware\AdminOrSupportMiddleware::class,
             'locale' => \App\Http\Middleware\LocaleMiddleware::class,
             'affiliate_tracking' => \App\Http\Middleware\AffiliateTrackingMiddleware::class,
+            'rider' => \App\Http\Middleware\RiderMiddleware::class,
         ]);
 
         $middleware->appendToGroup('api', [
