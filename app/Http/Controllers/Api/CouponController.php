@@ -8,6 +8,48 @@ use Illuminate\Http\Request;
 
 class CouponController extends Controller
 {
+    public function index()
+    {
+        $coupons = Coupon::latest()->get();
+        return response()->json([
+            'success' => true,
+            'data' => $coupons
+        ]);
+    }
+
+    public function store(Request $request)
+    {
+        $validated = $request->validate([
+            'code' => 'required|string|unique:coupons,code',
+            'type' => 'required|in:percentage,fixed',
+            'value' => 'required|numeric|min:0',
+            'minimum_order_amount' => 'nullable|numeric|min:0',
+            'max_uses' => 'nullable|integer|min:1',
+            'per_user_limit' => 'nullable|integer|min:1',
+            'expires_at' => 'nullable|date',
+            'is_active' => 'boolean',
+        ]);
+
+        $coupon = Coupon::create($validated);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Coupon created successfully',
+            'data' => $coupon
+        ], 201);
+    }
+
+    public function destroy($id)
+    {
+        $coupon = Coupon::findOrFail($id);
+        $coupon->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Coupon deleted successfully'
+        ]);
+    }
+
     public function validate(Request $request)
     {
         $request->validate([

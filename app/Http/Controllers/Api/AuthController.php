@@ -65,7 +65,8 @@ class AuthController extends Controller
                     'id' => $user->id,
                     'name' => $user->name,
                     'email' => $user->email,
-                    'role' => $request->role
+                    'role' => $user->getRoleNames()->first(),
+                    'avatar' => $user->avatar ? asset('storage/' . $user->avatar) : null,
                 ],
                 'token' => $token
             ]
@@ -217,7 +218,8 @@ class AuthController extends Controller
                     'id' => $user->id,
                     'name' => $user->name,
                     'email' => $user->email,
-                    'role' => $role,
+                    'role' => $user->getRoleNames()->first(),
+                    'avatar' => $user->avatar ? asset('storage/' . $user->avatar) : null,
                 ],
                 'token' => $token,
             ],
@@ -242,7 +244,8 @@ class AuthController extends Controller
                     'id' => $user->id,
                     'name' => $user->name,
                     'email' => $user->email,
-                    'role' => $user->role
+                    'role' => $user->getRoleNames()->first(),
+                    'avatar' => $user->avatar ? asset('storage/' . $user->avatar) : null,
                 ]
             ]
         ]);
@@ -377,7 +380,7 @@ class AuthController extends Controller
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
-                'role' => $role,
+                'role' => $user->getRoleNames()->first(),
                 'avatar' => $user->avatar 
                     ? asset('storage/' . $user->avatar) 
                     : null,

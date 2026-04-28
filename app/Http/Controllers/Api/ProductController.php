@@ -46,24 +46,24 @@ class ProductController extends Controller
             }
 
             // Apply filters
-            if ($request->has('category_id')) {
+            if ($request->filled('category_id') && $request->category_id !== 'all') {
                 $query->where('category_id', $request->category_id);
             }
 
-            if ($request->has('search')) {
+            if ($request->filled('search')) {
                 $query->where('name', 'like', '%' . $request->search . '%');
             }
 
-            if ($request->has('min_price')) {
+            if ($request->filled('min_price')) {
                 $query->where('price', '>=', $request->min_price);
             }
 
-            if ($request->has('max_price')) {
+            if ($request->filled('max_price')) {
                 $query->where('price', '<=', $request->max_price);
             }
 
             // Allow Admin/Seller to filter by specific status
-            if ($request->has('status') && ($user && ($user->hasRole('admin') || $user->hasRole('seller')))) {
+            if ($request->filled('status') && $request->status !== 'all' && ($user && ($user->hasRole('admin') || $user->hasRole('seller')))) {
                 $query->where('status', $request->status);
             }
 

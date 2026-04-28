@@ -31,6 +31,7 @@ use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\ShippingController;
 use App\Http\Controllers\Api\DeviceController;
 use App\Http\Controllers\Api\Admin\UserController as AdminUserController;
+use App\Http\Controllers\Api\Admin\DashboardController as AdminDashboardController;
 use App\Http\Controllers\Api\ReviewController;
 use App\Http\Controllers\Api\Admin\RiderController;
 use App\Http\Controllers\Api\Rider\RiderDashboardController;
@@ -50,7 +51,8 @@ use App\Http\Controllers\Api\Seller\DashboardController as SellerDashboardContro
 use App\Http\Controllers\Api\Seller\SellerOrderController;
 use App\Http\Controllers\Api\Seller\SellerAnalyticsController;
 use App\Http\Controllers\Api\Seller\SellerProfileController;
-
+use App\Http\Controllers\Api\Rider\RiderProfileController;
+use App\Http\Controllers\Api\Support\SupportProfileController;
 
 Route::prefix('auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
@@ -200,6 +202,13 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Admin-only
     Route::middleware('admin')->prefix('admin')->group(function () {
+        // Admin profile
+        Route::get('/profile', [ProfileController::class, 'show']);
+        Route::put('/profile', [ProfileController::class, 'update']);
+        Route::post('/profile/avatar', [ProfileController::class, 'uploadAvatar']);
+        Route::post('/profile/change-password', [ProfileController::class, 'changePassword']);
+
+        Route::get('/dashboard/stats', [AdminDashboardController::class, 'stats']);
         Route::get('/products/low-stock', [ProductController::class, 'getLowStockProducts']);
         Route::apiResource('categories', CategoryController::class)->except(['index']);
         Route::apiResource('discounts', DiscountController::class);
@@ -225,6 +234,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Search analytics
         Route::get('/search/top', [SearchController::class, 'topSearches']);
+
+        // Coupons
+        Route::apiResource('coupons', CouponController::class);
 
         // Reports
         Route::get('/reports/sales', [ReportController::class, 'sales']);
@@ -406,6 +418,7 @@ Route::middleware(['auth:sanctum', 'can:manage-blog'])->prefix('admin/blog')->gr
     Route::post('/posts', [\App\Http\Controllers\Api\Blog\PostController::class, 'store']);
     Route::patch('/posts/{post}', [\App\Http\Controllers\Api\Blog\PostController::class, 'update']);
     Route::post('/categories', [\App\Http\Controllers\Api\Blog\CategoryController::class, 'store']);
+    Route::get('/comments', [\App\Http\Controllers\Api\Blog\CommentController::class, 'adminIndex']);
     Route::patch('/comments/{comment}/moderate', [\App\Http\Controllers\Api\Blog\CommentController::class, 'moderate']);
 });
 
@@ -417,3 +430,20 @@ Route::get('/localization/strings/{lang}', [\App\Http\Controllers\Api\Admin\Tran
 Route::get('/analytics/open/{campaignId}/{userId}', [EmailAnalyticsController::class, 'trackOpen']);
 Route::get('/analytics/click/{campaignId}/{userId}', [EmailAnalyticsController::class, 'trackClick']);
 
+// Rider profile routes
+Route::middleware(['auth:sanctum', 'rider'])
+    ->prefix('rider')->group(function () {
+    Route::get('/profile', [RiderProfileController::class, 'show']);
+    Route::put('/profile', [RiderProfileController::class, 'update']);
+    Route::post('/profile/avatar', [RiderProfileController::class, 'uploadAvatar']);
+    Route::post('/profile/change-password', [RiderProfileController::class, 'changePassword']);
+});
+
+// Support profile routes
+Route::middleware(['auth:sanctum', 'support'])
+    ->prefix('support')->group(function () {
+    Route::get('/profile', [SupportProfileController::class, 'show']);
+    Route::put('/profile', [SupportProfileController::class, 'update']);
+    Route::post('/profile/avatar', [SupportProfileController::class, 'uploadAvatar']);
+    Route::post('/profile/change-password', [SupportProfileController::class, 'changePassword']);
+});

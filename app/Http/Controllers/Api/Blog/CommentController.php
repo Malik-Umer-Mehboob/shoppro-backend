@@ -8,6 +8,13 @@ use Illuminate\Http\Request;
 
 class CommentController extends Controller
 {
+    public function adminIndex(Request $request)
+    {
+        $this->authorize('manage-blog');
+        $query = BlogComment::with(['post', 'user'])->latest();
+        return response()->json($query->paginate(20));
+    }
+
     public function store(Request $request)
     {
         $request->validate([

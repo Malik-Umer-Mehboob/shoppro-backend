@@ -19,9 +19,9 @@ class TicketController extends Controller
     {
         $user = $request->user();
         if ($user->isSupportAgent() || $user->isAdmin()) {
-            $tickets = $this->ticketService.getAllTickets($request->all());
+            $tickets = $this->ticketService->getAllTickets($request->all());
         } else {
-            $tickets = $this->ticketService.getCustomerTickets($user->id);
+            $tickets = $this->ticketService->getCustomerTickets($user->id);
         }
 
         return response()->json(['success' => true, 'data' => $tickets]);

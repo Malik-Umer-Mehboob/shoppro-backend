@@ -142,6 +142,11 @@ class User extends Authenticatable
         return $this->hasMany(Order::class, 'seller_id');
     }
 
+    public function riderAssignments(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(RiderAssignment::class, 'rider_id');
+    }
+
     public function isSubscribedToNewsletter(): bool
     {
         return $this->subscribed_to_newsletter;
