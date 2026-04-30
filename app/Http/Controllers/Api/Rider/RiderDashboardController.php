@@ -32,8 +32,8 @@ class RiderDashboardController extends Controller
                 return [
                     'id' => $a->id,
                     'order_number' => '#' . str_pad($a->order_id, 4, '0', STR_PAD_LEFT),
-                    'customer_name' => $a->order->user->name ?? 'Guest',
-                    'customer_phone' => $a->order->user->phone ?? 'N/A',
+                    'customer_name' => $a->order?->user?->name ?? 'Guest',
+                    'customer_phone' => $a->order?->user?->phone ?? 'N/A',
                     'delivery_address' => $a->order->shipping_address ?? [],
                     'status' => $a->status,
                     'assigned_at' => $a->assigned_at->diffForHumans(),

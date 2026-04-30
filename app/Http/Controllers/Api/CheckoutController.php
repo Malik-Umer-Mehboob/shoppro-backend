@@ -151,6 +151,20 @@ class CheckoutController extends Controller
         // Clear cart
         $cart->items()->delete();
 
+        // Send order confirmation email
+        \App\Helpers\EmailHelper::sendTemplate(
+            'order_confirmation',
+            $user->email,
+            $user->name,
+            [
+                'customer_name' => $user->name,
+                'order_number' => str_pad($order->id, 4, '0', STR_PAD_LEFT),
+                'total' => number_format($order->grand_total),
+                'payment_method' => strtoupper($order->payment_method),
+                'items_count' => $order->items()->count(),
+            ]
+        );
+
         return response()->json([
             'success' => true,
             'message' => 'Order placed successfully!',

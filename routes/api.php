@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\Admin\GlobalSearchController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\ProductVariantController;
@@ -21,6 +22,8 @@ use App\Http\Controllers\Api\TicketController;
 use App\Http\Controllers\Api\EmailPreferenceController;
 use App\Http\Controllers\Api\EmailAnalyticsController;
 use App\Http\Controllers\Api\Admin\EmailCampaignController;
+use App\Http\Controllers\Api\Admin\CampaignController;
+use App\Http\Controllers\Api\Admin\SegmentController;
 use App\Http\Controllers\Api\Admin\UserSegmentController;
 use App\Http\Controllers\Api\Admin\NewsletterController;
 use App\Http\Controllers\Api\Admin\EmailTemplateController;
@@ -202,6 +205,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Admin-only
     Route::middleware('admin')->prefix('admin')->group(function () {
+        Route::get('/global-search', [GlobalSearchController::class, 'search']);
         // Admin profile
         Route::get('/profile', [ProfileController::class, 'show']);
         Route::put('/profile', [ProfileController::class, 'update']);
@@ -209,7 +213,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/profile/change-password', [ProfileController::class, 'changePassword']);
 
         Route::get('/dashboard/stats', [AdminDashboardController::class, 'stats']);
-        Route::get('/products/low-stock', [ProductController::class, 'getLowStockProducts']);
+        Route::get('/low-stock', [ProductController::class, 'getLowStockProducts']);
         Route::apiResource('categories', CategoryController::class)->except(['index']);
         Route::apiResource('discounts', DiscountController::class);
 
@@ -281,6 +285,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('warehouses', WarehouseController::class);
         Route::get('/warehouses/{id}/stock', [WarehouseController::class, 'stock']);
         Route::patch('/warehouses/{warehouseId}/stock/{productId}', [WarehouseController::class, 'updateStock']);
+        Route::delete('/warehouses/{warehouseId}/products/{productId}', [WarehouseController::class, 'removeProduct']);
+        Route::get('/warehouses/{id}/available-products', [WarehouseController::class, 'availableProducts']);
     });
 
     // Admin or Seller
@@ -289,6 +295,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/products/{id}/images', [ProductController::class, 'uploadImages']);
         Route::delete('/products/{id}/images/{imageId}', [ProductController::class, 'deleteImage']);
         Route::patch('/products/{id}/status', [ProductController::class, 'updateStatus']);
+        Route::patch('/products/{id}/restock', [ProductController::class, 'restock']);
 
         // Variants
         Route::post('/products/{id}/variants', [ProductVariantController::class, 'store']);
@@ -352,13 +359,21 @@ Route::middleware('auth:sanctum')->group(function () {
     // Admin Email Marketing
     Route::middleware(['admin_or_support'])->prefix('admin')->group(function () {
         // Campaigns
-        Route::get('/email-campaigns', [EmailCampaignController::class, 'index']);
-        Route::post('/email-campaigns', [EmailCampaignController::class, 'store']);
-        Route::get('/email-campaigns/{id}', [EmailCampaignController::class, 'show']);
-        Route::put('/email-campaigns/{id}', [EmailCampaignController::class, 'update']);
-        Route::post('/email-campaigns/{id}/send', [EmailCampaignController::class, 'send']);
+        Route::get('/campaigns/segments', [CampaignController::class, 'getSegments']);
+        Route::get('/email-campaigns', [CampaignController::class, 'index']);
+        Route::post('/email-campaigns', [CampaignController::class, 'store']);
+        Route::get('/email-campaigns/{id}', [CampaignController::class, 'show']);
+        Route::put('/email-campaigns/{id}', [CampaignController::class, 'update']);
+        Route::delete('/email-campaigns/{id}', [CampaignController::class, 'destroy']);
+        Route::post('/email-campaigns/{id}/send', [CampaignController::class, 'send']);
 
         // Segments
+        Route::get('/segments', [SegmentController::class, 'index']);
+        Route::post('/segments', [SegmentController::class, 'store']);
+        Route::put('/segments/{id}', [SegmentController::class, 'update']);
+        Route::delete('/segments/{id}', [SegmentController::class, 'destroy']);
+        Route::get('/segments/{id}/users', [SegmentController::class, 'users']);
+
         Route::get('/user-segments', [UserSegmentController::class, 'index']);
         Route::post('/user-segments', [UserSegmentController::class, 'store']);
         Route::get('/user-segments/{id}', [UserSegmentController::class, 'show']);
@@ -368,14 +383,18 @@ Route::middleware('auth:sanctum')->group(function () {
         // Newsletters
         Route::get('/newsletters', [NewsletterController::class, 'index']);
         Route::post('/newsletters', [NewsletterController::class, 'store']);
+        Route::delete('/newsletters/{id}', [NewsletterController::class, 'destroy']);
         Route::post('/newsletters/{id}/send', [NewsletterController::class, 'send']);
-        Route::get('/newsletter-subscribers', [NewsletterController::class, 'subscribers']);
+        Route::get('/newsletters/{id}/report', [NewsletterController::class, 'report']);
+        Route::get('/newsletters/subscribers', [NewsletterController::class, 'subscribers']);
 
         // Templates
         Route::get('/email-templates', [EmailTemplateController::class, 'index']);
         Route::post('/email-templates', [EmailTemplateController::class, 'store']);
+        Route::get('/email-templates/{id}', [EmailTemplateController::class, 'show']);
         Route::put('/email-templates/{id}', [EmailTemplateController::class, 'update']);
         Route::delete('/email-templates/{id}', [EmailTemplateController::class, 'destroy']);
+        Route::patch('/email-templates/{id}/toggle', [EmailTemplateController::class, 'toggleActive']);
 
         // Multilingual Support
         Route::apiResource('languages', \App\Http\Controllers\Api\Admin\LanguageController::class);

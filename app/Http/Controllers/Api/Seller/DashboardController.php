@@ -61,7 +61,7 @@ class DashboardController extends Controller
                 return [
                     'order_number' => '#' . str_pad($item->order_id, 4, '0', STR_PAD_LEFT),
                     'product_name' => $item->product->name ?? 'N/A',
-                    'customer_name' => $item->order->user->name ?? 'Guest',
+                    'customer_name' => $item->order?->user?->name ?? 'Guest',
                     'quantity' => $item->quantity,
                     'total' => $item->total,
                     'status' => $item->order->status,

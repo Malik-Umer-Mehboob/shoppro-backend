@@ -30,7 +30,7 @@ class EmailCampaignController extends Controller
                     'name' => $campaign->name,
                     'subject' => $campaign->subject,
                     'status' => $campaign->status,
-                    'segment_name' => $campaign->segment?->name ?? 'All Users',
+                    'segment_name' => $campaign->segment?->name ?? ($campaign->results['builtin_segment_name'] ?? 'All Users'),
                     'sent_count' => $campaign->sent_count ?? 0,
                     'open_count' => $campaign->open_count ?? 0,
                     'click_count' => $campaign->click_count ?? 0,
@@ -87,10 +87,30 @@ class EmailCampaignController extends Controller
             'subject'         => 'required|string',
             'ab_test_subject' => 'nullable|string',
             'content'         => 'required|string',
-            'segment_id'      => 'nullable|exists:user_segments,id',
+            'segment_id'      => 'nullable|string',
             'scheduled_at'    => 'nullable|date',
             'status'          => 'string|in:draft,scheduled',
         ]);
+
+        if (isset($data['segment_id'])) {
+            if (str_starts_with($data['segment_id'], 'custom_')) {
+                $data['segment_id'] = (int) str_replace('custom_', '', $data['segment_id']);
+            } elseif (!is_numeric($data['segment_id'])) {
+                // Built-in segment
+                $builtinNames = [
+                    'all_users' => 'All Users',
+                    'all_customers' => 'All Customers',
+                    'all_sellers' => 'All Sellers',
+                    'new_users' => 'New Users',
+                    'newsletter_subscribers' => 'Subscribers',
+                ];
+                $data['results'] = [
+                    'builtin_segment' => $data['segment_id'],
+                    'builtin_segment_name' => $builtinNames[$data['segment_id']] ?? 'All Users'
+                ];
+                $data['segment_id'] = null;
+            }
+        }
 
         $campaign = $this->campaignService->createCampaign($data);
 
@@ -116,10 +136,30 @@ class EmailCampaignController extends Controller
             'subject'         => 'string',
             'ab_test_subject' => 'nullable|string',
             'content'         => 'string',
-            'segment_id'      => 'nullable|exists:user_segments,id',
+            'segment_id'      => 'nullable|string',
             'scheduled_at'    => 'nullable|date',
             'status'          => 'string|in:draft,scheduled',
         ]);
+
+        if (isset($data['segment_id'])) {
+            if (str_starts_with($data['segment_id'], 'custom_')) {
+                $data['segment_id'] = (int) str_replace('custom_', '', $data['segment_id']);
+            } elseif (!is_numeric($data['segment_id'])) {
+                // Built-in segment
+                $builtinNames = [
+                    'all_users' => 'All Users',
+                    'all_customers' => 'All Customers',
+                    'all_sellers' => 'All Sellers',
+                    'new_users' => 'New Users',
+                    'newsletter_subscribers' => 'Subscribers',
+                ];
+                $data['results'] = [
+                    'builtin_segment' => $data['segment_id'],
+                    'builtin_segment_name' => $builtinNames[$data['segment_id']] ?? 'All Users'
+                ];
+                $data['segment_id'] = null;
+            }
+        }
 
         $campaign = $this->campaignService->updateCampaign($id, $data);
 

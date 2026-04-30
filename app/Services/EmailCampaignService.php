@@ -42,7 +42,35 @@ class EmailCampaignService
         $campaign = EmailCampaign::findOrFail($campaignId);
         $campaign->update(['status' => 'sending']);
 
-        $users = $campaign->segment->getMatchingUsers();
+        $users = collect();
+        if ($campaign->segment) {
+            $users = $campaign->segment->getMatchingUsers();
+        } elseif (isset($campaign->results['builtin_segment'])) {
+            $builtin = $campaign->results['builtin_segment'];
+            switch ($builtin) {
+                case 'all_users':
+                    $users = \App\Models\User::whereDoesntHave('roles', function($q){$q->where('name', 'admin');})->get();
+                    break;
+                case 'all_customers':
+                    $users = \App\Models\User::whereHas('roles', function($q){$q->where('name', 'customer');})->get();
+                    break;
+                case 'all_sellers':
+                    $users = \App\Models\User::whereHas('roles', function($q){$q->where('name', 'seller');})->get();
+                    break;
+                case 'new_users':
+                    $users = \App\Models\User::whereDoesntHave('roles', function($q){$q->where('name', 'admin');})
+                        ->where('created_at', '>=', now()->subDays(30))->get();
+                    break;
+                case 'newsletter_subscribers':
+                    $users = \App\Models\User::where('subscribed_to_newsletter', true)->get();
+                    break;
+                default:
+                    $users = \App\Models\User::whereDoesntHave('roles', function($q){$q->where('name', 'admin');})->get();
+            }
+        } else {
+            // Default fallback
+            $users = \App\Models\User::whereDoesntHave('roles', function($q){$q->where('name', 'admin');})->get();
+        }
 
         foreach ($users as $user) {
             SendEmailCampaignJob::dispatch($campaign, $user);

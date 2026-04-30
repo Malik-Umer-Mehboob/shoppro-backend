@@ -26,7 +26,7 @@ class DashboardController extends Controller
             ->count();
         $ordersGrowth = $lastMonthOrders > 0 
             ? round((($thisMonthOrders - $lastMonthOrders) / $lastMonthOrders) * 100, 1) 
-            : 0;
+            : ($thisMonthOrders > 0 ? 100 : 0);
 
         // Total Revenue and Growth
         $totalRevenue = Order::where('payment_status', 'paid')->sum('grand_total');
@@ -40,7 +40,7 @@ class DashboardController extends Controller
             ->sum('grand_total');
         $revenueGrowth = $lastMonthRevenue > 0 
             ? round((($thisMonthRevenue - $lastMonthRevenue) / $lastMonthRevenue) * 100, 1) 
-            : 0;
+            : ($thisMonthRevenue > 0 ? 100 : 0);
 
         // New Users (this month) and Growth
         $totalUsers = User::whereDoesntHave('roles', function($q) {
@@ -58,19 +58,25 @@ class DashboardController extends Controller
           ->count();
         $usersGrowth = $lastMonthUsers > 0 
             ? round((($thisMonthUsers - $lastMonthUsers) / $lastMonthUsers) * 100, 1) 
-            : 0;
+            : ($thisMonthUsers > 0 ? 100 : 0);
 
-        // Total Products and Growth
-        $totalProducts = Product::count();
-        $lastMonthProducts = Product::whereMonth('created_at', now()->subMonth()->month)
+        // Total Products and Growth (Fix: Use withoutGlobalScopes and include statuses)
+        $totalProducts = Product::withoutGlobalScopes()->count();
+        $publishedProducts = Product::withoutGlobalScopes()->where('status', 'published')->count();
+        $draftProducts = Product::withoutGlobalScopes()->where('status', 'draft')->count();
+        $archivedProducts = Product::withoutGlobalScopes()->where('status', 'archived')->count();
+
+        $lastMonthProducts = Product::withoutGlobalScopes()
+            ->whereMonth('created_at', now()->subMonth()->month)
             ->whereYear('created_at', now()->subMonth()->year)
             ->count();
-        $thisMonthProducts = Product::whereMonth('created_at', now()->month)
+        $thisMonthProducts = Product::withoutGlobalScopes()
+            ->whereMonth('created_at', now()->month)
             ->whereYear('created_at', now()->year)
             ->count();
         $productsGrowth = $lastMonthProducts > 0 
             ? round((($thisMonthProducts - $lastMonthProducts) / $lastMonthProducts) * 100, 1) 
-            : 0;
+            : ($thisMonthProducts > 0 ? 100 : 0);
 
         // Recent Orders (last 5)
         $recentOrders = Order::with(['user'])
@@ -81,8 +87,8 @@ class DashboardController extends Controller
                 return [
                     'id' => $order->id,
                     'order_number' => '#' . str_pad($order->id, 4, '0', STR_PAD_LEFT),
-                    'customer_name' => $order->user->name ?? 'Guest',
-                    'customer_email' => $order->user->email ?? '',
+                    'customer_name' => $order->user?->name ?? 'Guest',
+                    'customer_email' => $order->user?->email ?? '',
                     'status' => $order->status,
                     'payment_status' => $order->payment_status,
                     'grand_total' => $order->grand_total,
@@ -101,6 +107,9 @@ class DashboardController extends Controller
                     'new_users' => $thisMonthUsers,
                     'users_growth' => (float)$usersGrowth,
                     'total_products' => $totalProducts,
+                    'published_products' => $publishedProducts,
+                    'draft_products' => $draftProducts,
+                    'archived_products' => $archivedProducts,
                     'products_growth' => (float)$productsGrowth,
                 ],
                 'recent_orders' => $recentOrders,

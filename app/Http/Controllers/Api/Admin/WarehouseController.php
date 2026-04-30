@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Warehouse;
 use App\Models\Product;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class WarehouseController extends Controller
 {
@@ -67,36 +68,120 @@ class WarehouseController extends Controller
         ]);
     }
 
-    // Get stock per warehouse
+    // Get warehouse with all products assigned to it
     public function stock($warehouseId)
     {
-        $warehouse = Warehouse::with(['products' => function ($q) {
-            $q->select('products.id', 'name', 'sku', 'thumbnail')
-              ->withPivot('quantity', 'reserved_quantity');
-        }])->findOrFail($warehouseId);
+        $warehouse = Warehouse::findOrFail($warehouseId);
+
+        $assignedProducts = DB::table('product_warehouse')
+            ->join('products', 'products.id', '=', 'product_warehouse.product_id')
+            ->leftJoin('categories', 'categories.id', '=', 'products.category_id')
+            ->where('product_warehouse.warehouse_id', $warehouseId)
+            ->select(
+                'products.id',
+                'products.name',
+                'products.sku',
+                'products.thumbnail',
+                'categories.name as category_name',
+                'product_warehouse.quantity',
+                'product_warehouse.reserved_quantity'
+            )
+            ->get()
+            ->map(function ($p) {
+                return [
+                    'id' => $p->id,
+                    'name' => $p->name,
+                    'sku' => $p->sku,
+                    'thumbnail' => $p->thumbnail
+                        ? asset('storage/' . $p->thumbnail)
+                        : null,
+                    'category' => $p->category_name ?? 'Uncategorized',
+                    'quantity' => $p->quantity,
+                    'reserved_quantity' => $p->reserved_quantity,
+                    'available' => $p->quantity - $p->reserved_quantity,
+                ];
+            });
 
         return response()->json([
             'success' => true,
-            'data' => $warehouse,
+            'data' => [
+                'warehouse' => [
+                    'id' => $warehouse->id,
+                    'name' => $warehouse->name,
+                    'location' => $warehouse->location,
+                ],
+                'products' => $assignedProducts,
+            ]
         ]);
     }
 
-    // Update product stock in warehouse
+    // Assign product to warehouse OR update existing stock
     public function updateStock(Request $request, $warehouseId, $productId)
     {
         $request->validate([
             'quantity' => 'required|integer|min:0',
         ]);
 
-        $warehouse = Warehouse::findOrFail($warehouseId);
-
-        $warehouse->products()->syncWithoutDetaching([
-            $productId => ['quantity' => $request->quantity]
-        ]);
+        DB::table('product_warehouse')->updateOrInsert(
+            [
+                'warehouse_id' => $warehouseId,
+                'product_id' => $productId,
+            ],
+            [
+                'quantity' => $request->quantity,
+                'reserved_quantity' => $request->reserved_quantity ?? 0,
+                'updated_at' => now(),
+                'created_at' => now(),
+            ]
+        );
 
         return response()->json([
             'success' => true,
-            'message' => 'Stock updated',
+            'message' => 'Stock updated successfully',
+        ]);
+    }
+
+    // Remove product from warehouse
+    public function removeProduct($warehouseId, $productId)
+    {
+        DB::table('product_warehouse')
+            ->where('warehouse_id', $warehouseId)
+            ->where('product_id', $productId)
+            ->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Product removed from warehouse',
+        ]);
+    }
+
+    // Get all products NOT yet assigned to this warehouse
+    public function availableProducts($warehouseId)
+    {
+        $assignedIds = DB::table('product_warehouse')
+            ->where('warehouse_id', $warehouseId)
+            ->pluck('product_id');
+
+        $products = Product::withoutGlobalScopes()
+            ->whereNotIn('id', $assignedIds)
+            ->where('status', 'published')
+            ->select('id', 'name', 'sku', 'stock_quantity', 'thumbnail')
+            ->get()
+            ->map(function ($p) {
+                return [
+                    'id' => $p->id,
+                    'name' => $p->name,
+                    'sku' => $p->sku,
+                    'stock_quantity' => $p->stock_quantity,
+                    'thumbnail' => $p->thumbnail
+                        ? asset('storage/' . $p->thumbnail)
+                        : null,
+                ];
+            });
+
+        return response()->json([
+            'success' => true,
+            'data' => $products,
         ]);
     }
 }

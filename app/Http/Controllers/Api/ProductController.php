@@ -32,9 +32,31 @@ class ProductController extends Controller
         $userRole = $user ? $user->getRoleNames()->first() : 'guest';
         $userId = $user ? $user->id : 'none';
 
+        // Stats calculation (outside cache for accuracy or included in cache)
+        $totalProductsQuery = Product::withoutGlobalScopes();
+        $publishedCountQuery = Product::withoutGlobalScopes()->where('status', 'published');
+        $draftCountQuery = Product::withoutGlobalScopes()->where('status', 'draft');
+        $lowStockCountQuery = Product::withoutGlobalScopes()
+            ->whereColumn('stock_quantity', '<=', 'low_stock_threshold')
+            ->where('stock_quantity', '>', 0);
+
+        if ($user && $user->hasRole('seller')) {
+            $totalProductsQuery->where('seller_id', $user->id);
+            $publishedCountQuery->where('seller_id', $user->id);
+            $draftCountQuery->where('seller_id', $user->id);
+            $lowStockCountQuery->where('seller_id', $user->id);
+        }
+
+        $stats = [
+            'total' => $totalProductsQuery->count(),
+            'published' => $publishedCountQuery->count(),
+            'drafts' => $draftCountQuery->count(),
+            'low_stock' => $lowStockCountQuery->count(),
+        ];
+
         $cacheKey = "products_index_{$userRole}_{$userId}_p{$page}_s{$search}_c{$categoryId}_min{$minPrice}_max{$maxPrice}_st{$status}";
 
-        return Cache::remember($cacheKey, now()->addMinutes(30), function () use ($request, $user) {
+        return Cache::remember($cacheKey, now()->addMinutes(30), function () use ($request, $user, $stats) {
             if ($user && $user->hasRole('admin')) {
                 $query = Product::with(['category', 'images', 'seller']);
             } elseif ($user && $user->hasRole('seller')) {
@@ -71,7 +93,10 @@ class ProductController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $products
+                'data' => [
+                    'products' => $products,
+                    'stats' => $stats
+                ]
             ]);
         });
     }
@@ -421,14 +446,85 @@ class ProductController extends Controller
      */
     public function getLowStockProducts()
     {
-        $products = Product::whereRaw('stock_quantity <= low_stock_threshold')
+        // Out of stock products (stock = 0)
+        $outOfStock = Product::withoutGlobalScopes()
+            ->where('stock_quantity', 0)
+            ->with(['category'])
+            ->get()
+            ->map(function ($p) {
+                return [
+                    'id' => $p->id,
+                    'name' => $p->name,
+                    'sku' => $p->sku,
+                    'stock_quantity' => $p->stock_quantity,
+                    'low_stock_threshold' => $p->low_stock_threshold,
+                    'status' => 'out_of_stock',
+                    'category' => $p->category?->name ?? 'Uncategorized',
+                    'thumbnail' => $p->thumbnail
+                        ? asset('storage/' . $p->thumbnail)
+                        : null,
+                    'price' => $p->price,
+                ];
+            });
+
+        // Below threshold products (stock > 0 but <= threshold)
+        $belowThreshold = Product::withoutGlobalScopes()
             ->where('stock_quantity', '>', 0)
-            ->with(['category', 'seller:id,name'])
-            ->get();
+            ->whereColumn('stock_quantity', '<=', 'low_stock_threshold')
+            ->with(['category'])
+            ->get()
+            ->map(function ($p) {
+                return [
+                    'id' => $p->id,
+                    'name' => $p->name,
+                    'sku' => $p->sku,
+                    'stock_quantity' => $p->stock_quantity,
+                    'low_stock_threshold' => $p->low_stock_threshold,
+                    'status' => 'low_stock',
+                    'category' => $p->category?->name ?? 'Uncategorized',
+                    'thumbnail' => $p->thumbnail
+                        ? asset('storage/' . $p->thumbnail)
+                        : null,
+                    'price' => $p->price,
+                ];
+            });
+
+        $allLowStock = collect()
+            ->merge($outOfStock)
+            ->merge($belowThreshold);
 
         return response()->json([
             'success' => true,
-            'data' => $products
+            'data' => [
+                'products' => $allLowStock,
+                'stats' => [
+                    'out_of_stock' => $outOfStock->count(),
+                    'below_threshold' => $belowThreshold->count(),
+                    'total' => $allLowStock->count(),
+                ],
+            ]
+        ]);
+    }
+
+    /**
+     * Restock a product.
+     */
+    public function restock(Request $request, $id)
+    {
+        $request->validate([
+            'quantity' => 'required|integer|min:1',
+        ]);
+
+        $product = Product::withoutGlobalScopes()->findOrFail($id);
+        $product->increment('stock_quantity', $request->quantity);
+
+        return response()->json([
+            'success' => true,
+            'message' => "Stock updated. New quantity: {$product->stock_quantity}",
+            'data' => [
+                'id' => $product->id,
+                'stock_quantity' => $product->stock_quantity,
+            ]
         ]);
     }
 }

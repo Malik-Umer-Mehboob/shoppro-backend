@@ -55,6 +55,19 @@ class AuthController extends Controller
         ]);
 
         $user->assignRole($request->role);
+        
+        // Send welcome email using template
+        \App\Helpers\EmailHelper::sendTemplate(
+            'welcome_email',
+            $user->email,
+            $user->name,
+            [
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $request->role,
+            ]
+        );
+
         $token = $user->createToken('auth_token')->plainTextToken;
 
         return response()->json([

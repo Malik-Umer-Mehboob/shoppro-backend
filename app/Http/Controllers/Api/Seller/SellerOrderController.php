@@ -28,8 +28,8 @@ class SellerOrderController extends Controller
                 'product_thumbnail' => $item->product->thumbnail 
                     ? asset('storage/' . $item->product->thumbnail) 
                     : null,
-                'customer_name' => $item->order->user->name ?? 'Guest',
-                'customer_email' => $item->order->user->email ?? '',
+                'customer_name' => $item->order?->user?->name ?? 'Guest',
+                'customer_email' => $item->order?->user?->email ?? '',
                 'quantity' => $item->quantity,
                 'price' => $item->price,
                 'total' => $item->total,

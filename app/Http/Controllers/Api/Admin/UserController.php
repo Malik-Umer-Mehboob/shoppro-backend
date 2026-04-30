@@ -1,5 +1,4 @@
 <?php
-
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
@@ -57,9 +56,44 @@ class UserController extends Controller
             ];
         });
 
+        // Stats calculation
+        $totalUsers = User::whereDoesntHave('roles', function ($q) {
+            $q->where('name', 'admin');
+        })->count();
+
+        $customerCount = User::whereHas('roles', function ($q) {
+            $q->where('name', 'customer');
+        })->count();
+
+        $sellerCount = User::whereHas('roles', function ($q) {
+            $q->where('name', 'seller');
+        })->count();
+
+        $supportCount = User::whereHas('roles', function ($q) {
+            $q->where('name', 'support');
+        })->count();
+
+        $riderCount = User::whereHas('roles', function ($q) {
+            $q->where('name', 'rider');
+        })->count();
+
+        $blockedCount = User::whereDoesntHave('roles', function ($q) {
+            $q->where('name', 'admin');
+        })->where('is_blocked', true)->count();
+
         return response()->json([
             'success' => true,
-            'data' => $mapped,
+            'data' => [
+                'users' => $mapped,
+                'stats' => [
+                    'total' => $totalUsers,
+                    'customers' => $customerCount,
+                    'sellers' => $sellerCount,
+                    'support' => $supportCount,
+                    'riders' => $riderCount,
+                    'blocked' => $blockedCount,
+                ],
+            ]
         ]);
     }
 
