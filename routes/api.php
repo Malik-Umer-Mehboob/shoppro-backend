@@ -197,11 +197,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/logout-all', [DeviceController::class, 'logoutAll']);
     });
 
-    // Rider routes
-    Route::middleware(['rider'])->prefix('rider')->group(function () {
-        Route::get('/dashboard', [RiderDashboardController::class, 'stats']);
-        Route::patch('/assignments/{id}/status', [RiderDashboardController::class, 'updateStatus']);
-    });
+
 
     // Admin-only
     Route::middleware('admin')->prefix('admin')->group(function () {
@@ -214,7 +210,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('/dashboard/stats', [AdminDashboardController::class, 'stats']);
         Route::get('/low-stock', [ProductController::class, 'getLowStockProducts']);
-        Route::apiResource('categories', CategoryController::class)->except(['index']);
+        Route::apiResource('categories', CategoryController::class);
+        Route::get('/category-requests', [\App\Http\Controllers\Api\CategoryRequestController::class, 'adminIndex']);
+        Route::post('/category-requests/{id}/approve', [\App\Http\Controllers\Api\CategoryRequestController::class, 'approve']);
+        Route::post('/category-requests/{id}/reject', [\App\Http\Controllers\Api\CategoryRequestController::class, 'reject']);
         Route::apiResource('discounts', DiscountController::class);
 
         // Admin refund processing
@@ -311,6 +310,17 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/orders/{id}', [OrderController::class, 'update']);
     });
 
+    // Rider
+    Route::middleware(['auth:sanctum', 'rider'])->prefix('rider')->group(function () {
+        Route::get('/dashboard', [RiderDashboardController::class, 'stats']);
+        Route::get('/assignments', [RiderDashboardController::class, 'assignments']);
+        Route::patch('/assignments/{id}/status', [RiderDashboardController::class, 'updateStatus']);
+        Route::get('/profile', [RiderProfileController::class, 'show']);
+        Route::put('/profile', [RiderProfileController::class, 'update']);
+        Route::post('/profile/avatar', [RiderProfileController::class, 'uploadAvatar']);
+        Route::post('/profile/change-password', [RiderProfileController::class, 'changePassword']);
+    });
+
     // Seller
     Route::middleware('seller')->prefix('seller')->group(function () {
         Route::get('/dashboard', [SellerDashboardController::class, 'stats']);
@@ -321,6 +331,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/profile/avatar', [SellerProfileController::class, 'uploadAvatar']);
         Route::post('/profile/change-password', [SellerProfileController::class, 'changePassword']);
         Route::get('/reports/sales', [ReportController::class, 'seller']);
+        Route::get('/category-requests', [\App\Http\Controllers\Api\CategoryRequestController::class, 'index']);
+        Route::post('/category-requests', [\App\Http\Controllers\Api\CategoryRequestController::class, 'store']);
     });
 
     // Support & Tickets
@@ -442,7 +454,7 @@ Route::middleware(['auth:sanctum', 'can:manage-blog'])->prefix('admin/blog')->gr
 });
 
 // Localization (Public)
-Route::get('/localization/languages', [\App\Http\Controllers\Api\Admin\LanguageController::class, 'index']);
+Route::get('/localization/languages', [\App\Http\Controllers\Api\LocalizationController::class, 'languages']);
 Route::get('/localization/strings/{lang}', [\App\Http\Controllers\Api\Admin\TranslationController::class, 'getStrings']);
 
 // Analytics tracking (Public)

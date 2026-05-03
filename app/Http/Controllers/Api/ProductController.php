@@ -32,39 +32,55 @@ class ProductController extends Controller
         $userRole = $user ? $user->getRoleNames()->first() : 'guest';
         $userId = $user ? $user->id : 'none';
 
-        // Stats calculation (outside cache for accuracy or included in cache)
-        $totalProductsQuery = Product::withoutGlobalScopes();
-        $publishedCountQuery = Product::withoutGlobalScopes()->where('status', 'published');
-        $draftCountQuery = Product::withoutGlobalScopes()->where('status', 'draft');
-        $lowStockCountQuery = Product::withoutGlobalScopes()
-            ->whereColumn('stock_quantity', '<=', 'low_stock_threshold')
-            ->where('stock_quantity', '>', 0);
-
+        // Optimized Stats calculation in a single query
+        $statsQuery = \Illuminate\Support\Facades\DB::table('products');
         if ($user && $user->hasRole('seller')) {
-            $totalProductsQuery->where('seller_id', $user->id);
-            $publishedCountQuery->where('seller_id', $user->id);
-            $draftCountQuery->where('seller_id', $user->id);
-            $lowStockCountQuery->where('seller_id', $user->id);
+            $statsQuery->where('seller_id', $user->id);
         }
 
-        $stats = [
-            'total' => $totalProductsQuery->count(),
-            'published' => $publishedCountQuery->count(),
-            'drafts' => $draftCountQuery->count(),
-            'low_stock' => $lowStockCountQuery->count(),
-        ];
+        $stats = (array) $statsQuery->selectRaw("
+            COUNT(*) as total,
+            SUM(CASE WHEN status = 'published' THEN 1 ELSE 0 END) as published,
+            SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) as drafts,
+            SUM(CASE WHEN stock_quantity <= low_stock_threshold AND stock_quantity > 0 THEN 1 ELSE 0 END) as low_stock
+        ")->first();
 
         $cacheKey = "products_index_{$userRole}_{$userId}_p{$page}_s{$search}_c{$categoryId}_min{$minPrice}_max{$maxPrice}_st{$status}";
 
         return Cache::remember($cacheKey, now()->addMinutes(30), function () use ($request, $user, $stats) {
             if ($user && $user->hasRole('admin')) {
-                $query = Product::with(['category', 'images', 'seller']);
+                $query = Product::select(
+                    'id', 'name', 'slug', 'price', 'sale_price', 
+                    'thumbnail', 'category_id', 'seller_id', 
+                    'stock_quantity', 'status', 'is_featured', 
+                    'sku', 'created_at'
+                )->with([
+                    'category:id,name,slug',
+                    'images:id,product_id,image_path,is_primary',
+                    'seller:id,name'
+                ]);
             } elseif ($user && $user->hasRole('seller')) {
-                $query = Product::with(['category', 'images', 'seller'])
-                    ->where('seller_id', $user->id);
+                $query = Product::select(
+                    'id', 'name', 'slug', 'price', 'sale_price', 
+                    'thumbnail', 'category_id', 'seller_id', 
+                    'stock_quantity', 'status', 'is_featured', 
+                    'sku', 'created_at'
+                )->with([
+                    'category:id,name,slug',
+                    'images:id,product_id,image_path,is_primary',
+                    'seller:id,name'
+                ])->where('seller_id', $user->id);
             } else {
-                $query = Product::with(['category', 'images', 'seller'])
-                    ->where('status', 'published');
+                $query = Product::select(
+                    'id', 'name', 'slug', 'price', 'sale_price', 
+                    'thumbnail', 'category_id', 'seller_id', 
+                    'stock_quantity', 'status', 'is_featured', 
+                    'sku', 'created_at'
+                )->with([
+                    'category:id,name,slug',
+                    'images:id,product_id,image_path,is_primary',
+                    'seller:id,name'
+                ])->where('status', 'published');
             }
 
             // Apply filters
@@ -296,6 +312,44 @@ class ProductController extends Controller
         }
 
         $product->update($validated);
+
+        // Low stock / out-of-stock notifications
+        $product->refresh();
+        if ($product->stock_quantity === 0) {
+            \App\Helpers\NotificationHelper::sendToRole(
+                'admin',
+                'stock.out',
+                'Out of Stock! 🚫',
+                "'{$product->name}' is now out of stock!",
+                ['url' => '/admin/low-stock']
+            );
+            if ($product->seller_id) {
+                \App\Helpers\NotificationHelper::send(
+                    $product->seller_id,
+                    'stock.out',
+                    'Out of Stock! 🚫',
+                    "Your product '{$product->name}' is now out of stock!",
+                    ['url' => '/seller/products']
+                );
+            }
+        } elseif ($product->stock_quantity <= $product->low_stock_threshold && $product->stock_quantity > 0) {
+            \App\Helpers\NotificationHelper::sendToRole(
+                'admin',
+                'stock.low',
+                'Low Stock Alert! ⚠️',
+                "'{$product->name}' has only {$product->stock_quantity} units left.",
+                ['url' => '/admin/low-stock']
+            );
+            if ($product->seller_id) {
+                \App\Helpers\NotificationHelper::send(
+                    $product->seller_id,
+                    'stock.low',
+                    'Low Stock Alert! ⚠️',
+                    "Your product '{$product->name}' has only {$product->stock_quantity} units left.",
+                    ['url' => '/seller/products']
+                );
+            }
+        }
 
         // Invalidate product cache
         Cache::forget("product_show_{$id}");

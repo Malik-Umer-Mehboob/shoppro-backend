@@ -42,6 +42,32 @@ class TicketController extends Controller
 
         $ticket = $this->ticketService->createTicket($data);
 
+        $user = $request->user();
+
+        \App\Helpers\NotificationHelper::sendToRole(
+            'support',
+            'ticket.new',
+            'New Support Ticket! 🎫',
+            "Customer {$user->name} submitted: '{$request->subject}'",
+            ['url' => '/support/tickets']
+        );
+
+        \App\Helpers\NotificationHelper::sendToRole(
+            'admin',
+            'ticket.new',
+            'New Support Ticket 🎫',
+            "Ticket from {$user->name}: '{$request->subject}'",
+            ['url' => '/admin/users']
+        );
+
+        \App\Helpers\NotificationHelper::send(
+            $user->id,
+            'ticket.created',
+            'Support Ticket Created ✅',
+            "Your ticket '{$request->subject}' has been submitted. We will respond within 24 hours.",
+            ['url' => '/help']
+        );
+
         return response()->json(['success' => true, 'data' => $ticket], 201);
     }
 

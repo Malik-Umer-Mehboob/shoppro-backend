@@ -66,6 +66,28 @@ class RiderController extends Controller
         // Update order status to processing
         $order->update(['status' => 'processing']);
 
+        // Notify rider
+        \App\Helpers\NotificationHelper::send(
+            $request->rider_id,
+            'delivery.assigned',
+            'New Delivery Assigned! 🚚',
+            'Order #' . str_pad($orderId, 4, '0', STR_PAD_LEFT)
+                . ' has been assigned to you for delivery.',
+            ['url' => '/rider/deliveries']
+        );
+
+        // Notify customer
+        if ($order->user_id) {
+            \App\Helpers\NotificationHelper::send(
+                $order->user_id,
+                'order.shipped',
+                'Order Out for Delivery! 🚚',
+                'Your order #' . str_pad($orderId, 4, '0', STR_PAD_LEFT)
+                    . ' is out for delivery. Rider is on the way!',
+                ['url' => '/user/orders']
+            );
+        }
+
         return response()->json([
             'success' => true,
             'message' => "Order assigned to {$rider->name}",

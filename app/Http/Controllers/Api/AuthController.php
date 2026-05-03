@@ -68,6 +68,15 @@ class AuthController extends Controller
             ]
         );
 
+        // Notify admin of new registration
+        \App\Helpers\NotificationHelper::sendToRole(
+            'admin',
+            'user.registered',
+            'New User Registered! 👤',
+            "New {$request->role}: {$user->name} ({$user->email}) joined ShopPro",
+            ['url' => '/admin/users']
+        );
+
         $token = $user->createToken('auth_token')->plainTextToken;
 
         return response()->json([

@@ -14,41 +14,25 @@ class ComparisonController extends Controller
     public function index(Request $request)
     {
         try {
-            $comparisonIds = session('comparison', []);
-            
-            if (empty($comparisonIds)) {
-                return response()->json([
-                    'success' => true,
-                    'data' => [],
-                ]);
-            }
+            $user = $request->user();
+            if (!$user) return response()->json(['success' => true, 'data' => []]);
 
-            $products = Product::with(['images', 'category'])
-                ->whereIn('id', $comparisonIds)
-                ->get()
-                ->map(function ($product) {
-                    return [
-                        'id' => $product->id,
-                        'name' => $product->name,
-                        'price' => $product->price,
-                        'sale_price' => $product->sale_price,
-                        'category' => $product->category?->name,
-                        'thumbnail' => $product->thumbnail,
-                        'stock_quantity' => $product->stock_quantity,
-                        'sku' => $product->sku,
-                    ];
-                });
+            $comparison = \App\Models\ProductComparison::where('user_id', $user->id)->first();
+            if (!$comparison) return response()->json(['success' => true, 'data' => []]);
+
+            $items = \App\Models\ProductComparisonItem::where('comparison_id', $comparison->id)
+                ->with(['product:id,name,price,sale_price,thumbnail,category_id,stock_quantity,status,sku', 'product.category:id,name'])
+                ->limit(4)
+                ->get();
+
+            $products = $items->map(fn($item) => $item->product)->filter()->values();
 
             return response()->json([
                 'success' => true,
                 'data' => $products,
             ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to load comparison',
-                'data' => [],
-            ], 500);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => true, 'data' => []]);
         }
     }
 

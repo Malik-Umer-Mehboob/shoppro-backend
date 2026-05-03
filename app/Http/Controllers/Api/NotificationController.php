@@ -25,9 +25,19 @@ class NotificationController extends Controller
      */
     public function unreadCount(Request $request)
     {
-        $count = Notification::forUser($request->user()->id)->unread()->count();
+        try {
+            $user = $request->user();
+            if (!$user) return response()->json(['unread_count' => 0]);
 
-        return response()->json(['unread_count' => $count]);
+            $count = \Illuminate\Support\Facades\DB::table('notifications')
+                ->where('user_id', $user->id)
+                ->whereNull('read_at')
+                ->count();
+
+            return response()->json(['unread_count' => $count]);
+        } catch (\Throwable $e) {
+            return response()->json(['unread_count' => 0]);
+        }
     }
 
     /**

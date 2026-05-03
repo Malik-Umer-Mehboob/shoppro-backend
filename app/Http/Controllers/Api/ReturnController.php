@@ -64,6 +64,15 @@ class ReturnController extends Controller
             'status' => 'pending',
         ]);
 
+        \App\Helpers\NotificationHelper::sendToRole(
+            'admin',
+            'return.new',
+            'New Return Request ↩️',
+            "Customer {$user->name} requested return for order #"
+                . str_pad($request->order_id, 4, '0', STR_PAD_LEFT),
+            ['url' => '/admin/orders']
+        );
+
         return response()->json([
             'success' => true,
             'message' => 'Return request submitted successfully',
@@ -158,6 +167,16 @@ class ReturnController extends Controller
             'approved_at' => now(),
         ]);
 
+        \App\Helpers\NotificationHelper::send(
+            $return->user_id,
+            'return.approved',
+            'Return Request Approved! ✅',
+            'Your return request for order #'
+                . str_pad($return->order_id, 4, '0', STR_PAD_LEFT)
+                . ' has been approved.',
+            ['url' => '/returns']
+        );
+
         return response()->json([
             'success' => true,
             'message' => 'Return request approved',
@@ -172,6 +191,16 @@ class ReturnController extends Controller
             'status' => 'rejected',
             'admin_notes' => $request->admin_notes ?? 'Request rejected by admin',
         ]);
+
+        \App\Helpers\NotificationHelper::send(
+            $return->user_id,
+            'return.rejected',
+            'Return Request Update',
+            'Your return request for order #'
+                . str_pad($return->order_id, 4, '0', STR_PAD_LEFT)
+                . ' was not approved.',
+            ['url' => '/returns']
+        );
 
         return response()->json([
             'success' => true,

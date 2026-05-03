@@ -76,6 +76,24 @@ class OrderController extends Controller
             if ($request->status === Order::STATUS_SHIPPED)   event(new OrderShipped($order));
             if ($request->status === Order::STATUS_DELIVERED) event(new OrderDelivered($order));
             if ($request->status === Order::STATUS_REFUNDED)  event(new OrderRefunded($order));
+
+            $statusMessages = [
+                'processing' => ['title' => 'Order Processing 🔄', 'msg' => 'Your order is being processed.'],
+                'shipped'    => ['title' => 'Order Shipped! 🚚', 'msg' => 'Your order is on the way!'],
+                'delivered'  => ['title' => 'Order Delivered! ✅', 'msg' => 'Your order has been delivered!'],
+                'cancelled'  => ['title' => 'Order Cancelled ❌', 'msg' => 'Your order has been cancelled.'],
+            ];
+
+            if (isset($statusMessages[$request->status]) && $order->user_id) {
+                \App\Helpers\NotificationHelper::send(
+                    $order->user_id,
+                    'order.' . $request->status,
+                    $statusMessages[$request->status]['title'],
+                    'Order #' . str_pad($order->id, 4, '0', STR_PAD_LEFT)
+                        . ': ' . $statusMessages[$request->status]['msg'],
+                    ['url' => '/user/orders']
+                );
+            }
         }
 
         return response()->json(['message' => 'Order updated.', 'order' => $order->fresh()]);
@@ -141,6 +159,15 @@ class OrderController extends Controller
             'payment_status' => $order->payment_status === 'paid' ? 'refunded' : 'failed',
             'payment_notes' => 'Order cancelled by customer within cancellation window',
         ]);
+
+        \App\Helpers\NotificationHelper::send(
+            auth()->id(),
+            'order.cancelled',
+            'Order Cancelled ❌',
+            'Order #' . str_pad($order->id, 4, '0', STR_PAD_LEFT)
+                . ' has been cancelled.',
+            ['url' => '/user/orders']
+        );
 
         return response()->json([
             'success' => true,
