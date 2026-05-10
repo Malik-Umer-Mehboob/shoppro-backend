@@ -82,8 +82,16 @@ class PostController extends Controller
 
         $post = BlogPost::create($data);
 
-        if ($request->has('tags')) {
-            $post->tags()->sync($request->tags);
+        if ($request->has('tags') && is_array($request->tags)) {
+            $tagIds = [];
+            foreach ($request->tags as $tagName) {
+                $tag = \App\Models\BlogTag::firstOrCreate(
+                    ['slug' => \Illuminate\Support\Str::slug($tagName)],
+                    ['name' => $tagName]
+                );
+                $tagIds[] = $tag->id;
+            }
+            $post->tags()->sync($tagIds);
         }
 
         return response()->json($post, 201);
@@ -106,8 +114,16 @@ class PostController extends Controller
 
         $post->update($data);
 
-        if ($request->has('tags')) {
-            $post->tags()->sync($request->tags);
+        if ($request->has('tags') && is_array($request->tags)) {
+            $tagIds = [];
+            foreach ($request->tags as $tagName) {
+                $tag = \App\Models\BlogTag::firstOrCreate(
+                    ['slug' => \Illuminate\Support\Str::slug($tagName)],
+                    ['name' => $tagName]
+                );
+                $tagIds[] = $tag->id;
+            }
+            $post->tags()->sync($tagIds);
         }
 
         return response()->json($post);

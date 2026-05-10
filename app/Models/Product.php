@@ -13,29 +13,19 @@ class Product extends Model
     use HasFactory, SoftDeletes, HasTranslations;
 
     protected $fillable = [
-        'seller_id',
-        'category_id',
-        'name',
-        'slug',
-        'description',
-        'short_description',
-        'price',
-        'sale_price',
-        'sku',
-        'stock_quantity',
-        'low_stock_threshold',
-        'status',
-        'is_featured',
-        'thumbnail',
-        'brand',
-        'search_keywords',
-        'translations',
+        'name', 'slug', 'description', 'short_description',
+        'price', 'sale_price', 'sku', 'stock_quantity',
+        'low_stock_threshold', 'status', 'is_featured',
+        'thumbnail', 'category_id', 'seller_id', 'brand',
+        'search_keywords', 'translations',
     ];
 
     protected $casts = [
+        'price' => 'decimal:2',
+        'sale_price' => 'decimal:2',
         'is_featured' => 'boolean',
-        'price'       => 'float',
-        'sale_price'  => 'float',
+        'stock_quantity' => 'integer',
+        'low_stock_threshold' => 'integer',
         'translations' => 'array',
     ];
 
@@ -62,7 +52,8 @@ class Product extends Model
 
     public function category()
     {
-        return $this->belongsTo(Category::class);
+        return $this->belongsTo(Category::class)
+            ->select('id', 'name', 'slug', 'parent_id');
     }
 
     public function images()

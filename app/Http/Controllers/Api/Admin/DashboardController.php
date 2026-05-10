@@ -60,17 +60,19 @@ class DashboardController extends Controller
             ? round((($thisMonthUsers - $lastMonthUsers) / $lastMonthUsers) * 100, 1) 
             : ($thisMonthUsers > 0 ? 100 : 0);
 
-        // Total Products and Growth (Fix: Use withoutGlobalScopes and include statuses)
-        $totalProducts = Product::withoutGlobalScopes()->count();
-        $publishedProducts = Product::withoutGlobalScopes()->where('status', 'published')->count();
-        $draftProducts = Product::withoutGlobalScopes()->where('status', 'draft')->count();
-        $archivedProducts = Product::withoutGlobalScopes()->where('status', 'archived')->count();
+        // Total Products and Growth (Fix: Use withoutGlobalScopes and include statuses, but exclude soft deleted)
+        $totalProducts = Product::withoutGlobalScopes()->whereNull('deleted_at')->count();
+        $publishedProducts = Product::withoutGlobalScopes()->whereNull('deleted_at')->where('status', 'published')->count();
+        $draftProducts = Product::withoutGlobalScopes()->whereNull('deleted_at')->where('status', 'draft')->count();
+        $archivedProducts = Product::withoutGlobalScopes()->whereNull('deleted_at')->where('status', 'archived')->count();
 
         $lastMonthProducts = Product::withoutGlobalScopes()
+            ->whereNull('deleted_at')
             ->whereMonth('created_at', now()->subMonth()->month)
             ->whereYear('created_at', now()->subMonth()->year)
             ->count();
         $thisMonthProducts = Product::withoutGlobalScopes()
+            ->whereNull('deleted_at')
             ->whereMonth('created_at', now()->month)
             ->whereYear('created_at', now()->year)
             ->count();

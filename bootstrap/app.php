@@ -31,7 +31,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->appendToGroup('api', [
             \App\Http\Middleware\LocaleMiddleware::class,
             \App\Http\Middleware\AffiliateTrackingMiddleware::class,
-            \App\Http\Middleware\CompressionMiddleware::class,
+            \App\Http\Middleware\GzipEncodeResponse::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

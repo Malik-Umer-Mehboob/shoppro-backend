@@ -16,15 +16,35 @@ class CategoryController extends Controller
      */
     public function index()
     {
-        return Cache::remember('categories_tree', now()->addDays(1), function () {
-            $categories = Category::with('children')->whereNull('parent_id')->orderBy('order')->get();
-            return response()->json([
-                'success' => true,
-                'data' => [
-                    'categories' => $categories
-                ]
-            ]);
-        });
+        $categories = \Cache::remember(
+            'categories_all', 300, // 5 minutes
+            function () {
+                return Category::with('children')
+                    ->whereNull('parent_id')
+                    ->where('is_active', true)
+                    ->orderBy('order')
+                    ->get()
+                    ->map(function ($cat) {
+                        return [
+                            'id' => $cat->id,
+                            'name' => $cat->name,
+                            'slug' => $cat->slug,
+                            'children' => $cat->children
+                                ->where('is_active', true)
+                                ->map(fn($c) => [
+                                    'id' => $c->id,
+                                    'name' => $c->name,
+                                    'slug' => $c->slug,
+                                ])->values(),
+                        ];
+                    });
+            }
+        );
+
+        return response()->json([
+            'success' => true,
+            'data' => ['categories' => $categories],
+        ]);
     }
 
     /**
@@ -42,7 +62,7 @@ class CategoryController extends Controller
 
         $category = Category::create($validated);
 
-        Cache::forget('categories_tree');
+        \Cache::forget('categories_all');
 
         return response()->json([
             'success' => true,
@@ -72,7 +92,7 @@ class CategoryController extends Controller
 
         $category->update($validated);
 
-        Cache::forget('categories_tree');
+        \Cache::forget('categories_all');
 
         return response()->json([
             'success' => true,
@@ -97,11 +117,29 @@ class CategoryController extends Controller
 
         $category->delete();
 
-        Cache::forget('categories_tree');
+        \Cache::forget('categories_all');
 
         return response()->json([
             'success' => true,
             'message' => 'Category deleted successfully'
+        ]);
+    }
+
+    /**
+     * Toggle category status.
+     */
+    public function toggle($id)
+    {
+        $category = Category::findOrFail($id);
+        $category->is_active = !$category->is_active;
+        $category->save();
+
+        \Cache::forget('categories_all');
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Category status updated',
+            'data' => $category
         ]);
     }
 }

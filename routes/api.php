@@ -211,6 +211,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/dashboard/stats', [AdminDashboardController::class, 'stats']);
         Route::get('/low-stock', [ProductController::class, 'getLowStockProducts']);
         Route::apiResource('categories', CategoryController::class);
+        Route::patch('/categories/{id}/toggle', [CategoryController::class, 'toggle']);
         Route::get('/category-requests', [\App\Http\Controllers\Api\CategoryRequestController::class, 'adminIndex']);
         Route::post('/category-requests/{id}/approve', [\App\Http\Controllers\Api\CategoryRequestController::class, 'approve']);
         Route::post('/category-requests/{id}/reject', [\App\Http\Controllers\Api\CategoryRequestController::class, 'reject']);
@@ -255,10 +256,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/search-analytics', [SearchAnalyticsController::class, 'index']);
 
         // Blog Management (Admin)
-        Route::get('/blog/categories', [BlogController::class, 'getCategories']);
-        Route::post('/blog/posts', [BlogController::class, 'store']);
-        Route::get('/blog/posts', [BlogController::class, 'index']);
-        Route::delete('/blog/posts/{id}', [BlogController::class, 'destroy']);
+        Route::get('/blog/categories', [\App\Http\Controllers\Api\Admin\BlogController::class, 'getCategories']);
+        Route::get('/blog/posts', [\App\Http\Controllers\Api\Admin\BlogController::class, 'index']);
+        Route::post('/blog/posts', [\App\Http\Controllers\Api\Admin\BlogController::class, 'store']);
+        Route::get('/blog/posts/{id}', [\App\Http\Controllers\Api\Admin\BlogController::class, 'show']);
+        Route::put('/blog/posts/{id}', [\App\Http\Controllers\Api\Admin\BlogController::class, 'update']);
+        Route::patch('/blog/posts/{id}', [\App\Http\Controllers\Api\Admin\BlogController::class, 'update']);
+        Route::delete('/blog/posts/{id}', [\App\Http\Controllers\Api\Admin\BlogController::class, 'destroy']);
 
         // User Management (Admin)
         Route::get('/users', [AdminUserController::class, 'index']);

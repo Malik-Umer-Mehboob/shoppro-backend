@@ -52,26 +52,31 @@ class DiscountController extends Controller
 
     public function update(Request $request, $id)
     {
-        $discount = \App\Models\Discount::findOrFail($id);
+        $discount = \DB::table('discounts')
+            ->where('id', $id)->first();
 
-        $validated = $request->validate([
-            'name' => 'sometimes|required|string|max:255',
-            'product_id' => 'nullable|exists:products,id',
-            'category_id' => 'nullable|exists:categories,id',
-            'type' => 'sometimes|required|in:percentage,fixed',
-            'value' => 'sometimes|required|numeric|min:0',
-            'badge_text' => 'nullable|string|max:50',
-            'starts_at' => 'nullable|date',
-            'ends_at' => 'nullable|date|after_or_equal:starts_at',
-            'is_active' => 'boolean',
-        ]);
+        if (!$discount) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Discount not found',
+            ], 404);
+        }
 
-        $discount->update($validated);
+        \DB::table('discounts')
+            ->where('id', $id)
+            ->update([
+                'name' => $request->name,
+                'type' => $request->type,
+                'value' => $request->value,
+                'starts_at' => $request->start_date ?: null,
+                'ends_at' => $request->end_date ?: null,
+                'is_active' => $request->is_active ?? true,
+                'updated_at' => now(),
+            ]);
 
         return response()->json([
             'success' => true,
-            'message' => 'Discount updated successfully',
-            'data' => $discount
+            'message' => 'Discount updated successfully!',
         ]);
     }
 

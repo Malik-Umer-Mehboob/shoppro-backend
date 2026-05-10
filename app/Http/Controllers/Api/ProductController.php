@@ -20,101 +20,76 @@ class ProductController extends Controller
      */
     public function index(Request $request)
     {
-        // Generate a unique cache key based on request parameters
-        $page = $request->get('page', 1);
-        $search = $request->get('search', '');
-        $categoryId = $request->get('category_id', '');
-        $minPrice = $request->get('min_price', '');
-        $maxPrice = $request->get('max_price', '');
-        $status = $request->get('status', '');
-        
-        $user = auth('sanctum')->user();
-        $userRole = $user ? $user->getRoleNames()->first() : 'guest';
-        $userId = $user ? $user->id : 'none';
+        $user = $request->user();
+        $isSeller = $user && $user->hasRole('seller');
+        $isAdmin = $user && $user->hasRole('admin');
 
-        // Optimized Stats calculation in a single query
-        $statsQuery = \Illuminate\Support\Facades\DB::table('products');
-        if ($user && $user->hasRole('seller')) {
-            $statsQuery->where('seller_id', $user->id);
+        $query = Product::select(
+            'id', 'name', 'slug', 'price', 'sale_price',
+            'thumbnail', 'category_id', 'seller_id',
+            'stock_quantity', 'status', 'is_featured',
+            'sku', 'short_description', 'created_at'
+        )->with([
+            'category:id,name,slug,parent_id',
+        ]);
+
+        if ($isAdmin) {
+            $query = Product::withoutGlobalScopes()
+                ->select(
+                    'id', 'name', 'slug', 'price', 'sale_price',
+                    'thumbnail', 'category_id', 'seller_id',
+                    'stock_quantity', 'status', 'is_featured',
+                    'sku', 'short_description', 'created_at'
+                )->with(['category:id,name,slug']);
+        } elseif ($isSeller) {
+            $query->where('seller_id', $user->id);
+        } else {
+            $query->where('status', 'published');
         }
 
-        $stats = (array) $statsQuery->selectRaw("
-            COUNT(*) as total,
-            SUM(CASE WHEN status = 'published' THEN 1 ELSE 0 END) as published,
-            SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) as drafts,
-            SUM(CASE WHEN stock_quantity <= low_stock_threshold AND stock_quantity > 0 THEN 1 ELSE 0 END) as low_stock
-        ")->first();
+        if ($request->search) {
+            $query->where('name', 'like',
+                '%' . $request->search . '%');
+        }
 
-        $cacheKey = "products_index_{$userRole}_{$userId}_p{$page}_s{$search}_c{$categoryId}_min{$minPrice}_max{$maxPrice}_st{$status}";
+        if ($request->status && $isAdmin) {
+            $query->where('status', $request->status);
+        }
 
-        return Cache::remember($cacheKey, now()->addMinutes(30), function () use ($request, $user, $stats) {
-            if ($user && $user->hasRole('admin')) {
-                $query = Product::select(
-                    'id', 'name', 'slug', 'price', 'sale_price', 
-                    'thumbnail', 'category_id', 'seller_id', 
-                    'stock_quantity', 'status', 'is_featured', 
-                    'sku', 'created_at'
-                )->with([
-                    'category:id,name,slug',
-                    'images:id,product_id,image_path,is_primary',
-                    'seller:id,name'
-                ]);
-            } elseif ($user && $user->hasRole('seller')) {
-                $query = Product::select(
-                    'id', 'name', 'slug', 'price', 'sale_price', 
-                    'thumbnail', 'category_id', 'seller_id', 
-                    'stock_quantity', 'status', 'is_featured', 
-                    'sku', 'created_at'
-                )->with([
-                    'category:id,name,slug',
-                    'images:id,product_id,image_path,is_primary',
-                    'seller:id,name'
-                ])->where('seller_id', $user->id);
-            } else {
-                $query = Product::select(
-                    'id', 'name', 'slug', 'price', 'sale_price', 
-                    'thumbnail', 'category_id', 'seller_id', 
-                    'stock_quantity', 'status', 'is_featured', 
-                    'sku', 'created_at'
-                )->with([
-                    'category:id,name,slug',
-                    'images:id,product_id,image_path,is_primary',
-                    'seller:id,name'
-                ])->where('status', 'published');
-            }
+        if ($request->category_id) {
+            $query->where('category_id',
+                $request->category_id);
+        }
 
-            // Apply filters
-            if ($request->filled('category_id') && $request->category_id !== 'all') {
-                $query->where('category_id', $request->category_id);
-            }
+        $products = $query->latest()->paginate(12);
 
-            if ($request->filled('search')) {
-                $query->where('name', 'like', '%' . $request->search . '%');
-            }
+        // Stats with single optimized query
+        $statsQuery = $isAdmin
+            ? Product::withoutGlobalScopes()
+            : ($isSeller
+                ? Product::where('seller_id', $user->id)
+                : Product::where('status', 'published'));
 
-            if ($request->filled('min_price')) {
-                $query->where('price', '>=', $request->min_price);
-            }
+        $stats = [
+            'total' => (clone $statsQuery)->count(),
+            'published' => (clone $statsQuery)
+                ->where('status', 'published')->count(),
+            'drafts' => (clone $statsQuery)
+                ->where('status', 'draft')->count(),
+            'low_stock' => (clone $statsQuery)
+                ->whereColumn('stock_quantity', '<=',
+                    'low_stock_threshold')
+                ->where('stock_quantity', '>', 0)
+                ->count(),
+        ];
 
-            if ($request->filled('max_price')) {
-                $query->where('price', '<=', $request->max_price);
-            }
-
-            // Allow Admin/Seller to filter by specific status
-            if ($request->filled('status') && $request->status !== 'all' && ($user && ($user->hasRole('admin') || $user->hasRole('seller')))) {
-                $query->where('status', $request->status);
-            }
-
-            $products = $query->latest()->paginate(12);
-
-            return response()->json([
-                'success' => true,
-                'data' => [
-                    'products' => $products,
-                    'stats' => $stats
-                ]
-            ]);
-        });
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'products' => $products,
+                'stats' => $stats,
+            ]
+        ]);
     }
 
     /**
@@ -123,19 +98,29 @@ class ProductController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'description' => 'nullable|string',
-            'short_description' => 'nullable|string|max:500',
-            'price' => 'required|numeric|min:0',
-            'sale_price' => 'nullable|numeric|min:0',
-            'category_id' => 'nullable|exists:categories,id',
-            'stock_quantity' => 'required|integer|min:0',
-            'low_stock_threshold' => 'nullable|integer|min:0',
-            'status' => 'nullable|in:draft,published,archived',
-            'is_featured' => 'nullable|boolean',
-            'thumbnail' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:2048',
-            'tags' => 'nullable|array',
-            'tags.*' => 'string',
+            'name'               => 'required|string|max:255',
+            'description'        => 'nullable|string',
+            'short_description'  => 'nullable|string|max:500',
+            'price'              => 'required|numeric|min:0',
+            'sale_price'         => 'nullable|numeric|min:0',
+            'category_id'        => 'nullable|exists:categories,id',
+            'stock_quantity'     => 'required|integer|min:0',
+            'low_stock_threshold'=> [
+                'nullable',
+                'integer',
+                'min:0',
+                function ($attribute, $value, $fail) use ($request) {
+                    $stock = (int) $request->input('stock_quantity', 0);
+                    if ($value !== null && $value >= $stock) {
+                        $fail('Low stock threshold must be less than stock quantity.');
+                    }
+                },
+            ],
+            'status'             => 'nullable|in:draft,published,archived',
+            'is_featured'        => 'nullable|boolean',
+            'thumbnail'          => 'nullable|image|mimes:jpeg,png,jpg,webp|max:2048',
+            'tags'               => 'nullable|array',
+            'tags.*'             => 'string',
         ]);
 
         // Convert is_featured to boolean explicitly
@@ -189,9 +174,9 @@ class ProductController extends Controller
         ])->findOrFail($id);
 
         $avgRating = $product->reviews()
-            ->where('is_approved', true)->avg('rating');
+            ->where('status', 'approved')->avg('rating');
         $reviewCount = $product->reviews()
-            ->where('is_approved', true)->count();
+            ->where('status', 'approved')->count();
 
         return response()->json([
             'success' => true,
@@ -205,9 +190,14 @@ class ProductController extends Controller
                 'sale_price' => $product->sale_price,
                 'sku' => $product->sku,
                 'stock_quantity' => $product->stock_quantity,
+                'low_stock_threshold' => $product->low_stock_threshold,
                 'status' => $product->status,
+                'is_featured' => $product->is_featured,
+                'category_id' => $product->category_id,
                 'thumbnail' => $product->thumbnail
-                    ? asset('storage/' . $product->thumbnail)
+                    ? (str_starts_with(trim($product->thumbnail), 'http')
+                        ? trim($product->thumbnail)
+                        : asset('storage/' . trim($product->thumbnail)))
                     : null,
                 'category' => $product->category?->name,
                 'seller' => $product->seller?->name,
@@ -217,6 +207,7 @@ class ProductController extends Controller
                     'is_primary' => $img->is_primary,
                 ]),
                 'variants' => $product->variants,
+                'tags' => $product->tags ?? [],
                 'average_rating' => round($avgRating ?? 0, 1),
                 'review_count' => $reviewCount,
                 // SEO fields
@@ -272,19 +263,31 @@ class ProductController extends Controller
         }
 
         $validated = $request->validate([
-            'name' => 'sometimes|required|string|max:255',
-            'description' => 'nullable|string',
-            'short_description' => 'nullable|string|max:500',
-            'price' => 'sometimes|required|numeric|min:0',
-            'sale_price' => 'nullable|numeric|min:0',
-            'category_id' => 'sometimes|required|exists:categories,id',
-            'stock_quantity' => 'sometimes|required|integer|min:0',
-            'low_stock_threshold' => 'nullable|integer|min:0',
-            'status' => 'nullable|in:draft,published,archived',
-            'is_featured' => 'nullable|boolean',
-            'thumbnail' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:2048',
-            'tags' => 'nullable|array',
-            'tags.*' => 'string',
+            'name'               => 'sometimes|required|string|max:255',
+            'description'        => 'nullable|string',
+            'short_description'  => 'nullable|string|max:500',
+            'price'              => 'sometimes|required|numeric|min:0',
+            'sale_price'         => 'nullable|numeric|min:0',
+            'category_id'        => 'sometimes|required|exists:categories,id',
+            'stock_quantity'     => 'sometimes|required|integer|min:0',
+            'low_stock_threshold'=> [
+                'nullable',
+                'integer',
+                'min:0',
+                function ($attribute, $value, $fail) use ($request, $product) {
+                    $stock = $request->has('stock_quantity')
+                        ? (int) $request->input('stock_quantity')
+                        : $product->stock_quantity;
+                    if ($value !== null && $value >= $stock) {
+                        $fail('Low stock threshold must be less than stock quantity.');
+                    }
+                },
+            ],
+            'status'             => 'nullable|in:draft,published,archived',
+            'is_featured'        => 'nullable|boolean',
+            'thumbnail'          => 'nullable|image|mimes:jpeg,png,jpg,webp|max:2048',
+            'tags'               => 'nullable|array',
+            'tags.*'             => 'string',
         ]);
 
         if ($request->has('is_featured')) {
@@ -369,9 +372,13 @@ class ProductController extends Controller
     {
         $product = Product::findOrFail($id);
 
-        // Check ownership
-        if (!$request->user()->isAdmin() && $product->seller_id !== $request->user()->id) {
-            return response()->json(['message' => 'Unauthorized'], 403);
+        // Check ownership/permissions
+        $user = $request->user();
+        if (!$user->hasRole('admin') && $product->seller_id !== $user->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized',
+            ], 403);
         }
 
         $product->delete();
@@ -515,7 +522,9 @@ class ProductController extends Controller
                     'status' => 'out_of_stock',
                     'category' => $p->category?->name ?? 'Uncategorized',
                     'thumbnail' => $p->thumbnail
-                        ? asset('storage/' . $p->thumbnail)
+                        ? (str_starts_with(trim($p->thumbnail), 'http')
+                            ? trim($p->thumbnail)
+                            : asset('storage/' . trim($p->thumbnail)))
                         : null,
                     'price' => $p->price,
                 ];
@@ -537,7 +546,9 @@ class ProductController extends Controller
                     'status' => 'low_stock',
                     'category' => $p->category?->name ?? 'Uncategorized',
                     'thumbnail' => $p->thumbnail
-                        ? asset('storage/' . $p->thumbnail)
+                        ? (str_starts_with(trim($p->thumbnail), 'http')
+                            ? trim($p->thumbnail)
+                            : asset('storage/' . trim($p->thumbnail)))
                         : null,
                     'price' => $p->price,
                 ];

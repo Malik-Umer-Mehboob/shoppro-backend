@@ -58,8 +58,6 @@ class NewsletterController extends Controller
             'subject' => $request->subject,
             'content' => $request->content,
             'status' => 'draft',
-            'sent_count' => 0,
-            'open_count' => 0,
             'scheduled_at' => $request->scheduled_at,
             'created_at' => now(),
             'updated_at' => now(),
@@ -106,8 +104,7 @@ class NewsletterController extends Controller
             ], 404);
         }
 
-        if ($newsletter->status === 'sent'
-            && $newsletter->sent_count > 0) {
+        if ($newsletter->status === 'sent') {
             return response()->json([
                 'success' => false,
                 'message' => 'Newsletter already sent',
@@ -158,7 +155,6 @@ class NewsletterController extends Controller
 
         DB::table('newsletters')->where('id', $id)->update([
             'status' => 'sent',
-            'sent_count' => $sentCount,
             'updated_at' => now(),
         ]);
 

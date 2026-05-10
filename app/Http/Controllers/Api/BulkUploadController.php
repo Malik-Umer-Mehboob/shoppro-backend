@@ -30,6 +30,7 @@ class BulkUploadController extends Controller
         $sellerId = auth()->id();
 
         foreach ($data as $index => $row) {
+            $row = array_map('trim', $row);
             if (count($row) !== count($header)) {
                 $errors[] = "Row " . ($index + 2) . ": Column count mismatch.";
                 continue;
@@ -52,6 +53,8 @@ class BulkUploadController extends Controller
                     'price' => $item['price'],
                     'sale_price' => $item['sale_price'] ?: null,
                     'stock_quantity' => $item['stock_quantity'] ?: 0,
+                    'low_stock_threshold' => $item['low_stock_threshold'] ?? 5,
+                    'thumbnail' => $item['thumbnail'] ?: null,
                     'status' => $item['status'] ?: 'published',
                 ]);
 

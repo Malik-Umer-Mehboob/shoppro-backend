@@ -14,23 +14,18 @@ class LocalizationController extends Controller
      */
     public function languages()
     {
-        try {
-            $languages = Cache::remember('languages', 3600, function () {
-                return DB::table('languages')
-                    ->where('is_active', true)
-                    ->select('id', 'name', 'code')
-                    ->get();
-            });
+        $languages = \Cache::remember(
+            'languages_all', 3600, // 1 hour
+            fn() => \DB::table('languages')
+                ->where('is_active', true)
+                ->select('id', 'name', 'code', 'flag',
+                    'is_default')
+                ->get()
+        );
 
-            return response()->json([
-                'success' => true,
-                'data' => $languages
-            ]);
-        } catch (\Throwable $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Localization Error: ' . $e->getMessage()
-            ], 500);
-        }
+        return response()->json([
+            'success' => true,
+            'data' => $languages,
+        ])->header('Cache-Control', 'public, max-age=3600');
     }
 }

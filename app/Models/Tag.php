@@ -9,6 +9,8 @@ class Tag extends Model
 {
     use HasFactory;
 
+    protected $table = 'product_tags';
+
     protected $fillable = [
         'name',
         'slug',

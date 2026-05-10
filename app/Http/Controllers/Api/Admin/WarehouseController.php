@@ -93,7 +93,9 @@ class WarehouseController extends Controller
                     'name' => $p->name,
                     'sku' => $p->sku,
                     'thumbnail' => $p->thumbnail
-                        ? asset('storage/' . $p->thumbnail)
+                        ? (str_starts_with(trim($p->thumbnail), 'http')
+                            ? trim($p->thumbnail)
+                            : asset('storage/' . trim($p->thumbnail)))
                         : null,
                     'category' => $p->category_name ?? 'Uncategorized',
                     'quantity' => $p->quantity,
@@ -174,7 +176,9 @@ class WarehouseController extends Controller
                     'sku' => $p->sku,
                     'stock_quantity' => $p->stock_quantity,
                     'thumbnail' => $p->thumbnail
-                        ? asset('storage/' . $p->thumbnail)
+                        ? (str_starts_with(trim($p->thumbnail), 'http')
+                            ? trim($p->thumbnail)
+                            : asset('storage/' . trim($p->thumbnail)))
                         : null,
                 ];
             });

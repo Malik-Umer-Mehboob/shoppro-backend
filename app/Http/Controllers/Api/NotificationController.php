@@ -25,19 +25,28 @@ class NotificationController extends Controller
      */
     public function unreadCount(Request $request)
     {
-        try {
-            $user = $request->user();
-            if (!$user) return response()->json(['unread_count' => 0]);
-
-            $count = \Illuminate\Support\Facades\DB::table('notifications')
-                ->where('user_id', $user->id)
-                ->whereNull('read_at')
-                ->count();
-
-            return response()->json(['unread_count' => $count]);
-        } catch (\Throwable $e) {
-            return response()->json(['unread_count' => 0]);
+        $user = $request->user();
+        if (!$user) {
+            return response()->json([
+                'success' => true,
+                'data' => ['count' => 0]
+            ]);
         }
+
+        $count = \Cache::remember(
+            "notif_count_{$user->id}", 30,
+            fn() => \DB::table('notifications')
+                ->where('notifiable_id', $user->id)
+                ->where('notifiable_type',
+                    'App\\Models\\User')
+                ->whereNull('read_at')
+                ->count()
+        );
+
+        return response()->json([
+            'success' => true,
+            'data' => ['count' => $count]
+        ]);
     }
 
     /**
@@ -48,6 +57,8 @@ class NotificationController extends Controller
         $notification = Notification::forUser($request->user()->id)->findOrFail($id);
         $notification->markAsRead();
 
+        \Cache::forget("notif_count_{$request->user()->id}");
+
         return response()->json(['message' => 'Notification marked as read.']);
     }
 
@@ -56,9 +67,12 @@ class NotificationController extends Controller
      */
     public function markAllRead(Request $request)
     {
-        Notification::forUser($request->user()->id)
+        $user = $request->user();
+        Notification::forUser($user->id)
             ->unread()
             ->update(['read_at' => now()]);
+
+        \Cache::forget("notif_count_{$user->id}");
 
         return response()->json(['message' => 'All notifications marked as read.']);
     }

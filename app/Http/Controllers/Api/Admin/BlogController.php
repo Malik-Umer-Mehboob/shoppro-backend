@@ -99,4 +99,80 @@ class BlogController extends Controller
             'message' => 'Blog post deleted successfully'
         ]);
     }
+    /**
+     * Display the specified blog post.
+     */
+    public function show($id)
+    {
+        $post = \DB::table('blog_posts')
+            ->where('id', $id)
+            ->first();
+
+        if (!$post) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Post not found',
+            ], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $post,
+        ]);
+    }
+
+    /**
+     * Update the specified blog post.
+     */
+    public function update(Request $request, $id)
+    {
+        $post = BlogPost::findOrFail($id);
+        
+        $validated = $request->validate([
+            'title' => 'required|string|max:255',
+            'content' => 'required|string',
+            'excerpt' => 'nullable|string|max:500',
+            'category_id' => 'nullable|exists:blog_categories,id',
+            'status' => 'required|in:draft,published,scheduled',
+            'tags' => 'nullable|array',
+            'tags.*' => 'string',
+            'thumbnail' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:2048',
+        ]);
+
+        if ($request->has('title') && $request->title !== $post->title) {
+            $validated['slug'] = Str::slug($request->title) . '-' . Str::lower(Str::random(4));
+        }
+
+        if ($request->status === 'published' && !$post->published_at) {
+            $validated['published_at'] = now();
+        }
+
+        if ($request->hasFile('thumbnail')) {
+            if ($post->thumbnail) {
+                Storage::disk('public')->delete($post->thumbnail);
+            }
+            $path = $request->file('thumbnail')->store('blog', 'public');
+            $validated['thumbnail'] = $path;
+        }
+
+        $post->update($validated);
+
+        if ($request->has('tags') && is_array($request->tags)) {
+            $tagIds = [];
+            foreach ($request->tags as $tagName) {
+                $tag = \App\Models\BlogTag::firstOrCreate(
+                    ['slug' => \Illuminate\Support\Str::slug($tagName)],
+                    ['name' => $tagName]
+                );
+                $tagIds[] = $tag->id;
+            }
+            $post->tags()->sync($tagIds);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Blog post updated successfully',
+            'data' => $post,
+        ]);
+    }
 }
