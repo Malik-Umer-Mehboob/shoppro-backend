@@ -67,24 +67,26 @@ class RiderController extends Controller
         $order->update(['status' => 'processing']);
 
         // Notify rider
-        \App\Helpers\NotificationHelper::send(
+        \App\Services\NotificationService::send(
             $request->rider_id,
             'delivery.assigned',
             'New Delivery Assigned! 🚚',
-            'Order #' . str_pad($orderId, 4, '0', STR_PAD_LEFT)
-                . ' has been assigned to you for delivery.',
-            ['url' => '/rider/deliveries']
+            'Order #' . str_pad($orderId, 4, '0', STR_PAD_LEFT) . ' has been assigned to you for delivery.',
+            ['order_id' => $orderId],
+            \App\Services\NotificationService::PRIORITY_HIGH,
+            '/rider/deliveries'
         );
 
         // Notify customer
         if ($order->user_id) {
-            \App\Helpers\NotificationHelper::send(
+            \App\Services\NotificationService::send(
                 $order->user_id,
                 'order.shipped',
                 'Order Out for Delivery! 🚚',
-                'Your order #' . str_pad($orderId, 4, '0', STR_PAD_LEFT)
-                    . ' is out for delivery. Rider is on the way!',
-                ['url' => '/user/orders']
+                'Your order #' . str_pad($orderId, 4, '0', STR_PAD_LEFT) . ' is out for delivery. Rider is on the way!',
+                ['order_id' => $orderId],
+                \App\Services\NotificationService::PRIORITY_MEDIUM,
+                '/user/orders'
             );
         }
 

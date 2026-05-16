@@ -21,26 +21,40 @@ class NotifyTicketUpdated implements ShouldQueue
         $customer = $ticket->customer;
 
         // Notify customer of update/reply
-        $this->notificationService->sendNotification($customer->id, 'ticket_updated', [
-            'ticket_id' => $ticket->id,
-            'status'    => $ticket->status,
-            'message'   => "Your ticket #{$ticket->id} has a new update. Status: {$ticket->status}"
-        ]);
+        \App\Services\NotificationService::send(
+            $customer->id,
+            'Ticket Updated 🎫',
+            "Your ticket #{$ticket->id} has a new update. Status: {$ticket->status}",
+            'ticket.updated',
+            \App\Services\NotificationService::PRIORITY_MEDIUM,
+            ['ticket_id' => $ticket->id],
+            "/help"
+        );
 
         // Send survey if resolved
         if ($ticket->status === 'Resolved') {
-            $this->notificationService->sendNotification($customer->id, 'ticket_survey', [
-                'ticket_id' => $ticket->id,
-                'message'   => "How was your experience? Please rate our support for ticket #{$ticket->id}."
-            ]);
+            \App\Services\NotificationService::send(
+                $customer->id,
+                'How was your experience? ⭐',
+                "Please rate our support for ticket #{$ticket->id}.",
+                'ticket.survey',
+                \App\Services\NotificationService::PRIORITY_MEDIUM,
+                ['ticket_id' => $ticket->id],
+                "/help"
+            );
         }
 
         // Notify agent if update is from customer
         if ($ticket->agent_id) {
-            $this->notificationService->sendNotification($ticket->agent_id, 'ticket_updated', [
-                'ticket_id' => $ticket->id,
-                'message'   => "Ticket #{$ticket->id} ({$ticket->subject}) has been updated."
-            ]);
+            \App\Services\NotificationService::send(
+                $ticket->agent_id,
+                'Ticket Updated 🎫',
+                "Ticket #{$ticket->id} ({$ticket->subject}) has been updated.",
+                'ticket.updated',
+                \App\Services\NotificationService::PRIORITY_HIGH,
+                ['ticket_id' => $ticket->id],
+                "/support/tickets"
+            );
         }
     }
 }

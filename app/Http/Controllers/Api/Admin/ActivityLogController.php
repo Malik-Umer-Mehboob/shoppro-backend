@@ -11,27 +11,35 @@ class ActivityLogController extends Controller
     {
         $query = ActivityLog::with('user:id,name,avatar');
 
-        if ($request->action) {
-            $query->where('action', 'like', '%' . $request->action . '%');
+        if ($request->filled('action')) {
+            $action = strtolower(trim($request->action));
+            $query->whereRaw('LOWER(action) LIKE ?', ["%{$action}%"]);
         }
 
-        if ($request->user_role) {
-            $query->where('user_role', $request->user_role);
+        if ($request->filled('user_role')) {
+            $role = strtolower(trim($request->user_role));
+            $query->whereRaw('LOWER(user_role) = ?', [$role]);
         }
 
-        if ($request->date_from) {
-            $query->whereDate('created_at', '>=', $request->date_from);
+        if ($request->filled('date_from')) {
+            $query->whereDate('created_at', '>=', trim($request->date_from));
         }
 
-        if ($request->date_to) {
-            $query->whereDate('created_at', '<=', $request->date_to);
+        if ($request->filled('date_to')) {
+            $query->whereDate('created_at', '<=', trim($request->date_to));
         }
 
-        if ($request->search) {
-            $query->where('description', 'like', '%' . $request->search . '%');
+        if ($request->filled('search')) {
+            $search = strtolower(trim($request->search));
+            $query->where(function($q) use ($search) {
+                $q->whereRaw('LOWER(description) LIKE ?', ["%{$search}%"])
+                  ->orWhereRaw('LOWER(user_name) LIKE ?', ["%{$search}%"])
+                  ->orWhereRaw('LOWER(action) LIKE ?', ["%{$search}%"]);
+            });
         }
 
-        $logs = $query->latest('created_at')->paginate(20);
+        $perPage = $request->input('per_page', 10);
+        $logs = $query->latest('created_at')->paginate($perPage);
 
         $mapped = $logs->through(function ($log) {
             return [

@@ -20,7 +20,9 @@ class OrderController extends Controller
         $query = Order::with(['customer', 'items', 'invoice'])->latest();
 
         if ($user->hasRole('seller')) {
-            $query->where('seller_id', $user->id);
+            $query->whereHas('items', function($q) use ($user) {
+                $q->where('seller_id', $user->id);
+            });
         }
 
         if ($request->filled('status')) {
@@ -37,13 +39,76 @@ class OrderController extends Controller
         return response()->json($query->paginate(15));
     }
 
+    public function export(Request $request)
+    {
+        $user = $request->user();
+        $query = Order::with(['customer'])->latest();
+
+        if ($user->hasRole('seller')) {
+            $query->whereHas('items', function($q) use ($user) {
+                $q->where('seller_id', $user->id);
+            });
+        }
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('id', 'like', "%{$search}%")
+                  ->orWhereHas('customer', fn($q2) => $q2->where('name', 'like', "%{$search}%"));
+            });
+        }
+
+        $orders = $query->get();
+
+        $headers = [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="orders-report-' . date('Y-m-d') . '.csv"',
+            'Pragma' => 'no-cache',
+            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
+            'Expires' => '0',
+        ];
+
+        $callback = function () use ($orders) {
+            $file = fopen('php://output', 'w');
+            
+            // Add BOM for Excel UTF-8 support
+            fputs($file, "\xEF\xBB\xBF");
+            
+            fputcsv($file, ['Order ID', 'Date', 'Customer Name', 'Total Amount', 'Order Status', 'Payment Status', 'Payment Method']);
+
+            foreach ($orders as $order) {
+                fputcsv($file, [
+                    $order->id,
+                    $order->created_at->format('Y-m-d H:i:s'),
+                    $order->customer?->name ?? 'Guest',
+                    $order->grand_total,
+                    ucfirst($order->status),
+                    ucfirst($order->payment_status),
+                    str_replace('_', ' ', ucfirst($order->payment_method)),
+                ]);
+            }
+            fclose($file);
+        };
+
+        return response()->stream($callback, 200, $headers);
+    }
+
     public function show(Request $request, $id)
     {
         $user  = $request->user();
         $order = Order::with(['customer', 'seller', 'items.product', 'items.variant', 'invoice'])->findOrFail($id);
 
-        if ($user->hasRole('seller') && $order->seller_id !== $user->id) {
-            return response()->json(['message' => 'Forbidden.'], 403);
+        if ($user->hasRole('seller')) {
+            // Ensure the seller owns at least one item in the order
+            if (!$order->items()->where('seller_id', $user->id)->exists()) {
+                return response()->json(['message' => 'Forbidden.'], 403);
+            }
+
+            // Only load items belonging to this seller
+            $order->setRelation('items', $order->items()->where('seller_id', $user->id)->with(['product', 'variant'])->get());
         }
 
         return response()->json($order);
@@ -74,7 +139,10 @@ class OrderController extends Controller
             );
 
             if ($request->status === Order::STATUS_SHIPPED)   event(new OrderShipped($order));
-            if ($request->status === Order::STATUS_DELIVERED) event(new OrderDelivered($order));
+            if ($request->status === Order::STATUS_DELIVERED) {
+                $order->update(['delivered_at' => now()]);
+                event(new OrderDelivered($order));
+            }
             if ($request->status === Order::STATUS_REFUNDED)  event(new OrderRefunded($order));
 
             $statusMessages = [
@@ -85,13 +153,13 @@ class OrderController extends Controller
             ];
 
             if (isset($statusMessages[$request->status]) && $order->user_id) {
-                \App\Helpers\NotificationHelper::send(
+                \App\Services\NotificationService::send(
                     $order->user_id,
                     'order.' . $request->status,
                     $statusMessages[$request->status]['title'],
                     'Order #' . str_pad($order->id, 4, '0', STR_PAD_LEFT)
                         . ': ' . $statusMessages[$request->status]['msg'],
-                    ['url' => '/user/orders']
+                    ['order_id' => $order->id]
                 );
             }
         }
@@ -160,13 +228,13 @@ class OrderController extends Controller
             'payment_notes' => 'Order cancelled by customer within cancellation window',
         ]);
 
-        \App\Helpers\NotificationHelper::send(
+        \App\Services\NotificationService::send(
             auth()->id(),
             'order.cancelled',
             'Order Cancelled ❌',
             'Order #' . str_pad($order->id, 4, '0', STR_PAD_LEFT)
                 . ' has been cancelled.',
-            ['url' => '/user/orders']
+            ['order_id' => $order->id]
         );
 
         return response()->json([

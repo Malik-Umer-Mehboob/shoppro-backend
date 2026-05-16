@@ -12,10 +12,9 @@ class SellerOrderController extends Controller
     public function index()
     {
         $seller = auth()->user();
-        $sellerProductIds = Product::where('seller_id', $seller->id)->pluck('id');
 
         $orders = OrderItem::with(['order.user', 'product'])
-            ->whereIn('product_id', $sellerProductIds)
+            ->where('seller_id', $seller->id)
             ->latest()
             ->paginate(15);
 

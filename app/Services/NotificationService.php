@@ -3,171 +3,163 @@
 namespace App\Services;
 
 use App\Models\Notification;
-use App\Models\Order;
 use App\Models\User;
+use Illuminate\Support\Facades\Log;
 
 class NotificationService
 {
+    // Priorities
+    const PRIORITY_LOW      = 'low';
+    const PRIORITY_MEDIUM   = 'medium';
+    const PRIORITY_HIGH     = 'high';
+    const PRIORITY_CRITICAL = 'critical';
+
+    // Categories for grouping
+    const CATEGORY_ORDER   = 'order';
+    const CATEGORY_SYSTEM  = 'system';
+    const CATEGORY_SUPPORT = 'support';
+    const CATEGORY_AUTH    = 'auth';
+
     /**
-     * Create an in-app notification for a user.
+     * Send notification to a specific user
      */
-    public function createNotification(
-        User $user,
+    public static function send(
+        int $userId,
         string $type,
         string $title,
         string $message,
-        ?string $link = null,
-        ?array $data = null
-    ): Notification {
-        return Notification::create([
-            'user_id' => $user->id,
-            'type'    => $type,
-            'title'   => $title,
-            'message' => $message,
-            'link'    => $link,
-            'data'    => $data,
-        ]);
+        array $data = [],
+        $priority = self::PRIORITY_MEDIUM,
+        $link = null,
+        $groupId = null
+    ) {
+        try {
+            // Check for duplicates/grouping if groupId is provided
+            if ($groupId) {
+                $existing = Notification::where('user_id', $userId)
+                    ->where('group_id', $groupId)
+                    ->where('is_read', false)
+                    ->where('created_at', '>', now()->subHours(1))
+                    ->first();
+
+                if ($existing) {
+                    $existing->update([
+                        'message' => $message,
+                        'data' => array_merge($existing->data ?? [], $data)
+                    ]);
+                    return $existing;
+                }
+            }
+
+            $notification = Notification::create([
+                'user_id' => $userId,
+                'type'    => $type,
+                'title'   => $title,
+                'message' => $message,
+                'data'    => $data,
+                'priority' => $priority,
+                'link'    => $link,
+                'group_id' => $groupId,
+                'is_read' => false,
+            ]);
+
+            // Real-time broadcast
+            self::broadcastNotification($notification);
+
+            // Clear unread count cache
+            \Cache::forget("notif_count_{$userId}");
+
+            return $notification;
+        } catch (\Exception $e) {
+            Log::error("Failed to send notification: " . $e->getMessage());
+            return null;
+        }
+    }
+
+    public static function sendToAdmins(
+        string $type,
+        string $title,
+        string $message,
+        array $data = []
+    ): void {
+        $admins = User::whereHas('roles', fn($q) =>
+            $q->where('name', 'admin')
+        )->get();
+ 
+        foreach ($admins as $admin) {
+            self::send($admin->id, $type, $title, $message, $data, self::PRIORITY_HIGH);
+        }
+    }
+ 
+    public static function notifyAdmins(
+        string $title,
+        string $message,
+        string $type,
+        $priority = self::PRIORITY_MEDIUM,
+        array $data = [],
+        $link = null
+    ): void {
+        $admins = User::role('admin')->get();
+ 
+        foreach ($admins as $admin) {
+            self::send($admin->id, $type, $title, $message, $data, $priority, $link);
+        }
+    }
+
+    public static function sendToSellers(
+        int $orderId,
+        string $title,
+        string $message,
+        array $data = []
+    ): void {
+        // Find sellers who have products in this order
+        $orderItems = \App\Models\OrderItem::with('product')
+            ->where('order_id', $orderId)->get();
+
+        $sellerIds = $orderItems
+            ->pluck('product.seller_id')
+            ->filter()
+            ->unique();
+
+        foreach ($sellerIds as $sellerId) {
+            self::send($sellerId, 'new_order', $title, $message, $data, self::PRIORITY_MEDIUM);
+        }
     }
 
     /**
-     * Send order-related notification.
+     * Send notification to all users with a specific role
      */
-    public function sendOrderNotification(Order $order, string $type): Notification
+    public static function sendToRole($role, $type, $title, $message, $priority = self::PRIORITY_MEDIUM, $data = [], $link = null)
     {
-        $titles = [
-            Notification::TYPE_ORDER_PLACED    => 'Order Confirmed!',
-            Notification::TYPE_ORDER_SHIPPED   => 'Your Order Has Been Shipped',
-            Notification::TYPE_ORDER_DELIVERED  => 'Order Delivered Successfully',
-            Notification::TYPE_ORDER_CANCELLED => 'Order Cancelled',
-            Notification::TYPE_ORDER_REFUNDED  => 'Refund Processed',
-        ];
-
-        $messages = [
-            Notification::TYPE_ORDER_PLACED    => "Your order #{$order->id} has been placed successfully. Total: PKR " . number_format($order->grand_total, 2),
-            Notification::TYPE_ORDER_SHIPPED   => "Your order #{$order->id} is on its way!" . ($order->tracking_number ? " Tracking: {$order->tracking_number}" : ''),
-            Notification::TYPE_ORDER_DELIVERED  => "Your order #{$order->id} has been delivered. Enjoy your purchase!",
-            Notification::TYPE_ORDER_CANCELLED => "Your order #{$order->id} has been cancelled.",
-            Notification::TYPE_ORDER_REFUNDED  => "A refund of PKR " . number_format($order->grand_total, 2) . " has been processed for order #{$order->id}.",
-        ];
-
-        return $this->createNotification(
-            $order->customer,
-            $type,
-            $titles[$type] ?? 'Order Update',
-            $messages[$type] ?? "Your order #{$order->id} has been updated.",
-            "/orders/{$order->id}",
-            ['order_id' => $order->id, 'status' => $order->status]
-        );
+        $users = User::role($role)->get();
+        foreach ($users as $user) {
+            self::send($user->id, $type, $title, $message, $data, $priority, $link);
+        }
     }
 
-    /**
-     * Notify seller about a new order.
-     */
-    public function notifySellerNewOrder(Order $order): ?Notification
+    public static function notifySupport($title, $message, $type, $priority = self::PRIORITY_MEDIUM, $data = [], $link = null)
     {
-        if (!$order->seller) return null;
-
-        return $this->createNotification(
-            $order->seller,
-            Notification::TYPE_NEW_ORDER,
-            'New Order Received!',
-            "You have a new order #{$order->id} worth PKR " . number_format($order->grand_total, 2),
-            "/orders/{$order->id}",
-            ['order_id' => $order->id]
-        );
+        self::sendToRole('support', $type, $title, $message, $priority, $data, $link);
     }
 
-    /**
-     * Send welcome notification.
-     */
-    public function sendWelcomeNotification(User $user): Notification
+    public static function broadcastNotification($notification)
     {
-        return $this->createNotification(
-            $user,
-            Notification::TYPE_WELCOME,
-            'Welcome to ShopPro! 🎉',
-            "Hi {$user->name}, welcome to ShopPro! Start exploring our amazing products and enjoy a great shopping experience.",
-            '/home'
-        );
+        // Integration with Pusher/Socket.io could go here
+        // For now we log it as per BROADCAST_DRIVER=log
+        try {
+            event(new \App\Events\NotificationSent($notification));
+        } catch (\Exception $e) {
+            Log::warning("Broadcasting failed: " . $e->getMessage());
+        }
     }
 
-    /**
-     * Send low stock alert to seller.
-     */
-    public function sendLowStockAlert(User $seller, $product): Notification
-    {
-        return $this->createNotification(
-            $seller,
-            Notification::TYPE_LOW_STOCK,
-            'Low Stock Alert ⚠️',
-            "Your product \"{$product->name}\" is running low on stock ({$product->stock_quantity} remaining).",
-            "/products/{$product->id}",
-            ['product_id' => $product->id, 'stock' => $product->stock_quantity]
-        );
-    }
-
-    /**
-     * Send review request notification.
-     */
-    public function sendReviewRequest(User $user, Order $order): Notification
-    {
-        return $this->createNotification(
-            $user,
-            Notification::TYPE_REVIEW_REQUEST,
-            'How was your order? ⭐',
-            "Your order #{$order->id} was delivered recently. We'd love to hear your feedback!",
-            "/orders/{$order->id}",
-            ['order_id' => $order->id]
-        );
-    }
-
-    /**
-     * Send abandoned cart reminder.
-     */
-    public function sendAbandonedCartReminder(User $user): Notification
-    {
-        return $this->createNotification(
-            $user,
-            Notification::TYPE_ABANDONED_CART,
-            'Your cart misses you! 🛒',
-            'You have items waiting in your cart. Complete your purchase before they sell out!',
-            '/cart'
-        );
-    }
-
-    /**
-     * Get unread count for a user.
-     */
-    public function getUnreadCount(User $user): int
-    {
-        return Notification::forUser($user->id)->unread()->count();
-    }
-
-    /**
-     * Check if user has opted in for a notification type.
-     */
-    public function shouldSendEmail(User $user, string $type): bool
-    {
-        $preferences = $user->email_preferences ?? [];
-
-        // Default to true if no preference set
-        return $preferences[$type] ?? true;
-    }
-
-    /**
-     * Get default email preferences.
-     */
-    public static function getDefaultPreferences(): array
+    public static function getDefaultPreferences()
     {
         return [
             'order_updates'   => true,
-            'shipping_updates'=> true,
             'promotions'      => true,
-            'price_drops'     => true,
-            'review_requests' => true,
-            'account_updates' => true,
-            'low_stock_alerts'=> true,
-            'cart_reminders'  => true,
+            'system_alerts'   => true,
+            'support_tickets' => true,
         ];
     }
 }

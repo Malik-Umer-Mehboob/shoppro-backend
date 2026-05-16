@@ -41,6 +41,18 @@ class EventServiceProvider extends ServiceProvider
         TicketUpdated::class => [
             NotifyTicketUpdated::class,
         ],
+        \App\Events\ReviewSubmitted::class => [
+            \App\Listeners\NotifyReviewSubmitted::class,
+        ],
+        \App\Events\CommentPosted::class => [
+            \App\Listeners\NotifyCommentPosted::class,
+        ],
+        \App\Events\InventoryLow::class => [
+            \App\Listeners\NotifyInventoryLow::class,
+        ],
+        \App\Events\PaymentVerified::class => [
+            \App\Listeners\NotifyPaymentVerified::class,
+        ],
     ];
 
     public function boot(): void

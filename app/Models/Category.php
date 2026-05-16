@@ -52,4 +52,9 @@ class Category extends Model
     {
         return $this->hasMany(Product::class);
     }
+
+    public function sellers()
+    {
+        return $this->belongsToMany(User::class, 'category_user');
+    }
 }

@@ -19,6 +19,7 @@ class SearchService
     {
         $q = Product::query()
             ->where('status', 'published')
+            ->where('moderation_status', 'approved')
             ->with(['category', 'images', 'variants', 'activeDiscount', 'seller']);
 
         // --- Full-text search ---
@@ -58,11 +59,22 @@ class SearchService
             $q->whereIn('brand', $brands);
         }
 
-        if (isset($filters['min_price'])) {
+        if (isset($filters['min_price']) && $filters['min_price'] !== '') {
             $q->where(DB::raw('COALESCE(sale_price, price)'), '>=', (float) $filters['min_price']);
         }
-        if (isset($filters['max_price'])) {
+        if (isset($filters['max_price']) && $filters['max_price'] !== '') {
             $q->where(DB::raw('COALESCE(sale_price, price)'), '<=', (float) $filters['max_price']);
+        }
+
+        if (!empty($filters['rating'])) {
+            $minRating = (float) $filters['rating'];
+            // Filter by average rating from the reviews table
+            $q->where(function ($sub) use ($minRating) {
+                $sub->selectRaw('AVG(rating)')
+                    ->from('reviews')
+                    ->whereColumn('product_id', 'products.id')
+                    ->where('status', 'approved');
+            }, '>=', $minRating);
         }
 
         if (!empty($filters['color'])) {
@@ -82,7 +94,7 @@ class SearchService
               ->whereRaw('((price - sale_price) / price) * 100 >= ?', [$minDiscount]);
         }
 
-        if (isset($filters['stock_status'])) {
+        if (!empty($filters['stock_status'])) {
             if ($filters['stock_status'] === 'in_stock') {
                 $q->where('stock_quantity', '>', 0);
             } elseif ($filters['stock_status'] === 'out_of_stock') {
@@ -122,6 +134,7 @@ class SearchService
         $like = '%' . $query . '%';
 
         $products = Product::where('status', 'published')
+            ->where('moderation_status', 'approved')
             ->where(function ($q) use ($like) {
                 $q->where('name', 'like', $like)
                   ->orWhere('brand', 'like', $like)
@@ -191,7 +204,8 @@ class SearchService
      */
     public function getAvailableFilters(string $query = ''): array
     {
-        $baseQuery = Product::where('status', 'published');
+        $baseQuery = Product::where('status', 'published')
+            ->where('moderation_status', 'approved');
 
         if (!empty($query)) {
             $like = '%' . $query . '%';

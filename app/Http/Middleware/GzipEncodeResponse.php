@@ -17,6 +17,12 @@ class GzipEncodeResponse
     {
         $response = $next($request);
 
+        // Skip Gzip for streamed or file responses — setContent() is not supported/needed
+        if ($response instanceof \Symfony\Component\HttpFoundation\StreamedResponse || 
+            $response instanceof \Symfony\Component\HttpFoundation\BinaryFileResponse) {
+            return $response;
+        }
+
         if (str_contains($request->header('Accept-Encoding', ''), 'gzip') && function_exists('gzencode')) {
             $response->setContent(gzencode($response->getContent(), 9));
             $response->headers->set('Content-Encoding', 'gzip');

@@ -23,6 +23,12 @@ class AuthController extends Controller
             'email' => 'required|email|unique:users,email',
             'password' => 'required|string|min:8',
             'role' => 'required|string|in:customer,seller,support,rider',
+            // Seller fields
+            'store_name' => 'required_if:role,seller|string|max:255',
+            'store_description' => 'required_if:role,seller|string',
+            'business_type' => 'required_if:role,seller|string|max:255',
+            'categories' => 'required_if:role,seller|array',
+            'categories.*' => 'exists:categories,id',
         ]);
 
         if ($request->role === 'customer' && !str_ends_with($request->email, '@gmail.com')) {
@@ -33,14 +39,17 @@ class AuthController extends Controller
             return response()->json(['success' => false, 'message' => 'Sellers must register with Yahoo email (@yahoo.com)'], 400);
         }
 
-        if ($request->role === 'support' && !str_ends_with($request->email, '@hotmail.com')) {
-            return response()->json(['success' => false, 'message' => 'Support staff must register with Hotmail (@hotmail.com)'], 400);
+        if ($request->role === 'support' && !str_ends_with($request->email, '@support.shoppro.com')) {
+            return response()->json([
+                'success' => false, 
+                'message' => 'Support staff must register with @support.shoppro.com email'
+            ], 422);
         }
 
-        if ($request->role === 'rider' && !str_ends_with($request->email, '@rider.com')) {
+        if ($request->role === 'rider' && !str_ends_with($request->email, '@rider.shoppro.com')) {
             return response()->json([
                 'success' => false,
-                'message' => 'Riders must register with @rider.com email',
+                'message' => 'Riders must register with @rider.shoppro.com email',
             ], 422);
         }
 
@@ -48,13 +57,41 @@ class AuthController extends Controller
             return response()->json(['success' => false, 'message' => 'Admin accounts cannot be created via registration'], 400);
         }
 
-        $user = User::create([
+        $userData = [
             'name' => $request->name,
             'email' => $request->email,
             'password' => Hash::make($request->password),
-        ]);
+        ];
+
+        if (in_array($request->role, ['rider', 'support'])) {
+            $userData['is_blocked'] = true;
+            $userData['block_reason'] = 'Awaiting admin approval';
+            $userData['staff_status'] = 'pending';
+        }
+
+        if ($request->role === 'seller') {
+            $userData['store_name'] = $request->store_name;
+            $userData['store_description'] = $request->store_description;
+            $userData['business_type'] = $request->business_type;
+            $userData['seller_status'] = 'pending';
+        }
+
+        $user = User::create($userData);
 
         $user->assignRole($request->role);
+
+        if ($request->role === 'seller' && $request->has('categories')) {
+            $user->assignedCategories()->attach($request->categories);
+        }
+
+        if ($request->role === 'seller' && $request->filled('categoryRequest')) {
+            \App\Models\CategoryRequest::create([
+                'user_id' => $user->id,
+                'name' => $request->categoryRequest,
+                'status' => 'pending',
+                'description' => 'Requested during registration',
+            ]);
+        }
         
         // Send welcome email using template
         \App\Helpers\EmailHelper::sendTemplate(
@@ -65,33 +102,23 @@ class AuthController extends Controller
                 'name' => $user->name,
                 'email' => $user->email,
                 'role' => $request->role,
+                'status' => $user->seller_status ?? 'active',
             ]
         );
 
         // Notify admin of new registration
-        \App\Helpers\NotificationHelper::sendToRole(
-            'admin',
-            'user.registered',
+        \App\Services\NotificationService::notifyAdmins(
             'New User Registered! 👤',
-            "New {$request->role}: {$user->name} ({$user->email}) joined ShopPro",
-            ['url' => '/admin/users']
+            "New {$request->role}: {$user->name} ({$user->email}) joined ShopPro" . ($request->role === 'seller' ? " and is pending approval." : "."),
+            'user.registered',
+            \App\Services\NotificationService::PRIORITY_MEDIUM,
+            ['user_id' => $user->id],
+            '/admin/users'
         );
-
-        $token = $user->createToken('auth_token')->plainTextToken;
 
         return response()->json([
             'success' => true,
-            'message' => 'Registration successful',
-            'data' => [
-                'user' => [
-                    'id' => $user->id,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                    'role' => $user->getRoleNames()->first(),
-                    'avatar' => $user->avatar ? asset('storage/' . $user->avatar) : null,
-                ],
-                'token' => $token
-            ]
+            'message' => 'Account created successfully. Please login.',
         ], 201);
     }
 
@@ -155,14 +182,7 @@ class AuthController extends Controller
 
         // Step 3 - Password check
         $adminEmail = 'malik.umerkhan97@gmail.com';
-        $adminPassword = 'malikawan97';
-
-        if ($request->email === $adminEmail) {
-            $passwordValid = ($request->password === $adminPassword) ||
-                             Hash::check($request->password, $user->password);
-        } else {
-            $passwordValid = Hash::check($request->password, $user->password);
-        }
+        $passwordValid = Hash::check($request->password, $user->password);
 
         if (!$passwordValid) {
             LoginAttempt::create([
@@ -196,20 +216,15 @@ class AuthController extends Controller
             if ($role === 'seller' && !str_ends_with($request->email, '@yahoo.com')) {
                 return response()->json(['success' => false, 'message' => 'Seller accounts must use Yahoo email'], 401);
             }
-            if ($role === 'support' && !str_ends_with($request->email, '@hotmail.com')) {
-                return response()->json(['success' => false, 'message' => 'Support accounts must use Hotmail'], 401);
+            if ($role === 'support' && !str_ends_with($request->email, '@support.shoppro.com')) {
+                return response()->json(['success' => false, 'message' => 'Support accounts must use @support.shoppro.com email'], 401);
             }
-            if ($role === 'rider' && !str_ends_with($request->email, '@rider.com')) {
+            if ($role === 'rider' && !str_ends_with($request->email, '@rider.shoppro.com')) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Rider accounts must use @rider.com email',
+                    'message' => 'Rider accounts must use @rider.shoppro.com email',
                 ], 401);
             }
-        }
-
-        // Step 5 - Block others from using admin password
-        if ($request->password === $adminPassword && $request->email !== $adminEmail) {
-            return response()->json(['success' => false, 'message' => 'Invalid credentials'], 401);
         }
 
         // Step 6 - Success - clear attempts and return token
@@ -242,6 +257,10 @@ class AuthController extends Controller
                     'email' => $user->email,
                     'role' => $user->getRoleNames()->first(),
                     'avatar' => $user->avatar ? asset('storage/' . $user->avatar) : null,
+                    'seller_status' => $user->seller_status,
+                    'store_name' => $user->store_name,
+                    'is_blocked' => $user->is_blocked,
+                    'block_reason' => $user->block_reason,
                 ],
                 'token' => $token,
             ],
@@ -268,6 +287,10 @@ class AuthController extends Controller
                     'email' => $user->email,
                     'role' => $user->getRoleNames()->first(),
                     'avatar' => $user->avatar ? asset('storage/' . $user->avatar) : null,
+                    'seller_status' => $user->seller_status,
+                    'store_name' => $user->store_name,
+                    'is_blocked' => $user->is_blocked,
+                    'block_reason' => $user->block_reason,
                 ]
             ]
         ]);
@@ -349,6 +372,17 @@ class AuthController extends Controller
         $record->delete();
 
         $user->tokens()->delete();
+
+        // Notify user of password reset
+        \App\Services\NotificationService::send(
+            $user->id,
+            'Security Alert: Password Reset 🔐',
+            'Your password was successfully changed. If you did not perform this action, please contact support immediately.',
+            'security.password_reset',
+            \App\Services\NotificationService::PRIORITY_HIGH,
+            ['ip' => $request->ip()],
+            '/profile'
+        );
 
         return response()->json([
             'success' => true,

@@ -119,4 +119,46 @@ class SellerProfileController extends Controller
             'message' => 'Password changed successfully',
         ]);
     }
+
+    /**
+     * Re-submit a rejected application.
+     */
+    public function reApply(Request $request)
+    {
+        $user = $request->user();
+        
+        if ($user->seller_status !== 'rejected') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only rejected applications can be re-submitted',
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'store_name' => 'required|string|max:100',
+            'store_description' => 'required|string|max:500',
+            'business_type' => 'required|string|max:50',
+            'categories' => 'required|array|min:1',
+            'categories.*' => 'exists:categories,id',
+        ]);
+
+        $user->update([
+            'store_name' => $validated['store_name'],
+            'store_description' => $validated['store_description'],
+            'business_type' => $validated['business_type'],
+            'seller_status' => 'pending',
+            'rejection_reason' => null, // Clear the reason
+        ]);
+
+        // Use standard categories relationship
+        if (method_exists($user, 'categories')) {
+            $user->categories()->sync($validated['categories']);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Application re-submitted successfully',
+            'data' => $user
+        ]);
+    }
 }

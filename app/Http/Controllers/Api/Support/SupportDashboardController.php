@@ -5,48 +5,104 @@ namespace App\Http\Controllers\Api\Support;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class SupportDashboardController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
+        Log::info('Support Dashboard stats requested.');
         $today = now()->toDateString();
+        $agentId = $request->user()->id;
 
+        // Overall Counts (Global for the system)
+        $totalTickets = DB::table('tickets')->count();
+        Log::info('Total Tickets Count: ' . $totalTickets);
+        
+        $openTickets = DB::table('tickets')
+            ->whereRaw('LOWER(status) = ?', ['open'])
+            ->count();
+        Log::info('Open Tickets Count: ' . $openTickets);
+
+        $inProgressTickets = DB::table('tickets')
+            ->where(function($q) {
+                $q->whereRaw('LOWER(status) = ?', ['in progress'])
+                  ->orWhereRaw('LOWER(status) = ?', ['pending']);
+            })
+            ->count();
+        Log::info('In Progress Tickets Count: ' . $inProgressTickets);
+
+        $resolvedTickets = DB::table('tickets')
+            ->whereRaw('LOWER(status) = ?', ['resolved'])
+            ->count();
+        Log::info('Resolved Tickets Count: ' . $resolvedTickets);
+
+        $closedTickets = DB::table('tickets')
+            ->whereRaw('LOWER(status) = ?', ['closed'])
+            ->count();
+        Log::info('Closed Tickets Count: ' . $closedTickets);
+
+        // Agent Specific Metrics (Last 7 Days)
+        // If admin, show global performance, if support, show their own
+        $isAdmin = $request->user()->isAdmin();
+        
+        $performanceMetrics = [];
+        for ($i = 6; $i >= 0; $i--) {
+            $date = now()->subDays($i)->toDateString();
+            $query = DB::table('tickets')->whereDate('created_at', $date);
+            
+            if (!$isAdmin) {
+                $query->where('agent_id', $agentId);
+            }
+            
+            $count = $query->count();
+            
+            $performanceMetrics[] = [
+                'date' => $date,
+                'day' => now()->subDays($i)->format('D'),
+                'count' => $count
+            ];
+        }
+
+        $agentTicketsQuery = DB::table('tickets');
+        if (!$isAdmin) {
+            $agentTicketsQuery->where('agent_id', $agentId);
+        }
+        $totalHandledByAgent = $agentTicketsQuery->count();
+
+        // Today's Stats
         $totalToday = DB::table('tickets')
             ->whereDate('created_at', $today)
             ->count();
 
         $resolvedToday = DB::table('tickets')
             ->whereDate('created_at', $today)
-            ->where('status', 'Resolved')
+            ->whereRaw('LOWER(status) = ?', ['resolved'])
+            ->count();
+
+        $activeChats = DB::table('tickets')
+            ->whereRaw('LOWER(status) = ?', ['open'])
+            ->whereDate('updated_at', $today)
             ->count();
 
         $shiftProgress = $totalToday > 0
             ? round(($resolvedToday / $totalToday) * 100)
             : 0;
 
-        $openTickets = DB::table('tickets')
-            ->where('status', 'Open')
-            ->count();
-
-        $pendingTickets = DB::table('tickets')
-            ->where('status', 'Pending')
-            ->count();
-
-        $activeChats = DB::table('tickets')
-            ->where('status', 'Open')
-            ->whereDate('updated_at', $today)
-            ->count();
-
         return response()->json([
             'success' => true,
             'data' => [
-                'shift_progress' => $shiftProgress,
+                'total_tickets' => $totalTickets,
                 'open_tickets' => $openTickets,
-                'pending_tickets' => $pendingTickets,
+                'in_progress_tickets' => $inProgressTickets,
+                'resolved_tickets' => $resolvedTickets,
+                'closed_tickets' => $closedTickets,
                 'resolved_today' => $resolvedToday,
                 'total_today' => $totalToday,
+                'shift_progress' => $shiftProgress,
                 'active_chats' => $activeChats,
+                'performance_metrics' => $performanceMetrics,
+                'total_handled_by_agent' => $totalHandledByAgent,
             ]
         ]);
     }

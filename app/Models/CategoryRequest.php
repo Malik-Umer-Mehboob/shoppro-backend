@@ -12,6 +12,7 @@ class CategoryRequest extends Model
     protected $fillable = [
         'user_id',
         'type',
+        'category_id',
         'name',
         'subcategory_name',
         'parent_id',
@@ -20,6 +21,11 @@ class CategoryRequest extends Model
         'status',
         'rejection_reason',
     ];
+
+    public function category()
+    {
+        return $this->belongsTo(Category::class);
+    }
 
     public function user()
     {

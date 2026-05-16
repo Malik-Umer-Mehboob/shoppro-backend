@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
@@ -10,7 +11,7 @@ use Spatie\Permission\Traits\HasRoles;
 
 class User extends Authenticatable
 {
-    use HasApiTokens, HasFactory, Notifiable, HasRoles;
+    use HasApiTokens, HasFactory, Notifiable, HasRoles, SoftDeletes;
 
     protected $fillable = [
         'name',
@@ -27,6 +28,16 @@ class User extends Authenticatable
         'subscribed_to_newsletter',
         'unsubscribe_token',
         'referred_by',
+        'store_name',
+        'store_description',
+        'business_type',
+        'store_logo',
+        'seller_status',
+        'vehicle_type',
+        'cnic',
+        'delivery_zone',
+        'staff_status',
+        'rejection_reason',
     ];
 
     protected $hidden = [
@@ -140,6 +151,26 @@ class User extends Authenticatable
     public function sellerOrders(): \Illuminate\Database\Eloquent\Relations\HasMany
     {
         return $this->hasMany(Order::class, 'seller_id');
+    }
+
+    public function assignedCategories(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    {
+        return $this->belongsToMany(Category::class, 'category_user');
+    }
+
+    public function products(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(Product::class, 'seller_id');
+    }
+
+    public function isApproved(): bool
+    {
+        return $this->seller_status === 'approved';
+    }
+
+    public function isPending(): bool
+    {
+        return $this->seller_status === 'pending';
     }
 
     public function riderAssignments(): \Illuminate\Database\Eloquent\Relations\HasMany

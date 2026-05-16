@@ -13,13 +13,12 @@ class SellerAnalyticsController extends Controller
     public function index()
     {
         $seller = auth()->user();
-        $sellerProductIds = Product::where('seller_id', $seller->id)->pluck('id');
 
         // Monthly revenue for last 6 months
         $monthlyRevenue = [];
         for ($i = 5; $i >= 0; $i--) {
             $month = now()->subMonths($i);
-            $revenue = OrderItem::whereIn('product_id', $sellerProductIds)
+            $revenue = OrderItem::where('order_items.seller_id', $seller->id)
                 ->whereHas('order', function($q) use ($month) {
                     $q->where('payment_status', 'paid')
                       ->whereYear('created_at', $month->year)
@@ -34,7 +33,7 @@ class SellerAnalyticsController extends Controller
         }
 
         // Top selling products
-        $topProducts = OrderItem::whereIn('product_id', $sellerProductIds)
+        $topProducts = OrderItem::where('order_items.seller_id', $seller->id)
             ->select('product_id', 
                 DB::raw('SUM(quantity) as total_sold'),
                 DB::raw('SUM(total) as total_revenue')
@@ -53,7 +52,7 @@ class SellerAnalyticsController extends Controller
             });
 
         // Orders by status
-        $ordersByStatus = OrderItem::whereIn('product_id', $sellerProductIds)
+        $ordersByStatus = OrderItem::where('order_items.seller_id', $seller->id)
             ->join('orders', 'order_items.order_id', '=', 'orders.id')
             ->select('orders.status', DB::raw('COUNT(DISTINCT orders.id) as count'))
             ->groupBy('orders.status')

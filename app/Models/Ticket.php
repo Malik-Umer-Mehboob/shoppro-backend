@@ -21,6 +21,7 @@ class Ticket extends Model
         'subject',
         'message',
         'language_id',
+        'attachment',
     ];
 
     public function language(): BelongsTo

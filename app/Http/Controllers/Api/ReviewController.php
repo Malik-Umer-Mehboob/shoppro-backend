@@ -90,13 +90,17 @@ class ReviewController extends Controller
             ->exists();
 
         $review = Review::create([
-            'user_id' => $user->id,
-            'product_id' => $productId,
-            'rating' => $request->rating,
-            'comment' => $request->comment,
-            'verified_purchase' => $hasPurchased,
-            'is_approved' => false,
+            'user_id'          => $user->id,
+            'product_id'       => $productId,
+            'rating'           => $request->rating,
+            'comment'          => $request->comment,
+            'verified_purchase'=> $hasPurchased,
+            'is_approved'      => false,
+            'status'           => Review::STATUS_PENDING,
         ]);
+
+        // Dispatch Event for Notifications
+        event(new \App\Events\ReviewSubmitted($review));
 
         Cache::flush();
 
@@ -106,6 +110,23 @@ class ReviewController extends Controller
                 ? 'Review submitted with Verified Purchase badge!' 
                 : 'Review submitted and awaiting approval',
             'data' => $review,
+        ]);
+    }
+
+    /**
+     * GET /api/admin/reviews/stats
+     * Global review counts — never filtered by tab.
+     */
+    public function adminStats()
+    {
+        $total    = Review::count();
+        $pending  = Review::where('is_approved', false)->count();
+        $approved = Review::where('is_approved', true)->count();
+        $verified = Review::where('verified_purchase', true)->count();
+
+        return response()->json([
+            'success' => true,
+            'data'    => compact('total', 'pending', 'approved', 'verified'),
         ]);
     }
 
@@ -226,5 +247,48 @@ class ReviewController extends Controller
         $review->delete();
         Cache::flush();
         return response()->json(['success' => true, 'message' => 'Review deleted.']);
+    }
+
+    /**
+     * GET /api/products/{productId}/can-review
+     * Check whether the authenticated user is eligible to review.
+     */
+    public function canReview(Request $request, $productId)
+    {
+        $user = $request->user();
+
+        // Already reviewed?
+        $hasReviewed = Review::where('user_id', $user->id)
+            ->where('product_id', $productId)
+            ->exists();
+
+        if ($hasReviewed) {
+            return response()->json(['success' => true, 'data' => [
+                'can_review' => false,
+                'reason'     => 'already_reviewed',
+                'message'    => 'You have already reviewed this product.',
+            ]]);
+        }
+
+        // Has a delivered order containing this product?
+        $hasPurchased = OrderItem::whereHas('order', function ($q) use ($user) {
+                $q->where('user_id', $user->id)->where('status', 'delivered');
+            })
+            ->where('product_id', $productId)
+            ->exists();
+
+        if (!$hasPurchased) {
+            return response()->json(['success' => true, 'data' => [
+                'can_review' => false,
+                'reason'     => 'not_purchased',
+                'message'    => 'Only customers who have received this product can leave a review.',
+            ]]);
+        }
+
+        return response()->json(['success' => true, 'data' => [
+            'can_review' => true,
+            'reason'     => null,
+            'message'    => 'You can review this product.',
+        ]]);
     }
 }

@@ -11,7 +11,8 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('category_requests', function (Blueprint $table) {
+        if (!Schema::hasTable('category_requests')) {
+            Schema::create('category_requests', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->constrained()->onDelete('cascade');
             $table->enum('type', ['main', 'sub', 'both'])->default('main');
@@ -24,6 +25,7 @@ return new class extends Migration
             $table->text('rejection_reason')->nullable();
             $table->timestamps();
         });
+        }
     }
 
     /**

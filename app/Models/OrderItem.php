@@ -11,6 +11,7 @@ class OrderItem extends Model
         'order_id',
         'product_id',
         'variant_id',
+        'seller_id',
         'name',
         'quantity',
         'price',
@@ -20,11 +21,17 @@ class OrderItem extends Model
     protected $casts = [
         'price' => 'float',
         'total' => 'float',
+        'seller_id' => 'integer',
     ];
 
     public function order(): BelongsTo
     {
         return $this->belongsTo(Order::class);
+    }
+
+    public function seller(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'seller_id');
     }
 
     public function product(): BelongsTo

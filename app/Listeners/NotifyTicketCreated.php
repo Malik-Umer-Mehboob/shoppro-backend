@@ -22,11 +22,15 @@ class NotifyTicketCreated implements ShouldQueue
         $customer = $ticket->customer;
 
         // Notify customer
-        $this->notificationService->sendNotification($customer->id, 'ticket_created', [
-            'ticket_id' => $ticket->id,
-            'subject'   => $ticket->subject,
-            'message'   => "Your ticket #{$ticket->id} has been created successfully."
-        ]);
+        \App\Services\NotificationService::send(
+            $customer->id,
+            'Support Ticket Created ✅',
+            "Your ticket #{$ticket->id} has been created successfully.",
+            'ticket.created',
+            \App\Services\NotificationService::PRIORITY_MEDIUM,
+            ['ticket_id' => $ticket->id],
+            '/help'
+        );
 
         // Auto-assign if possible (e.g. to a support agent)
         $agent = User::where('role', 'support')->inRandomOrder()->first();
@@ -34,11 +38,15 @@ class NotifyTicketCreated implements ShouldQueue
             $ticket->update(['agent_id' => $agent->id]);
             
             // Notify agent
-            $this->notificationService->sendNotification($agent->id, 'ticket_assigned', [
-                'ticket_id' => $ticket->id,
-                'customer'  => $customer->name,
-                'message'   => "New ticket #{$ticket->id} assigned to you: {$ticket->subject}"
-            ]);
+            \App\Services\NotificationService::send(
+                $agent->id,
+                'New Ticket Assigned 🎫',
+                "New ticket #{$ticket->id} assigned to you: {$ticket->subject}",
+                'ticket.assigned',
+                \App\Services\NotificationService::PRIORITY_HIGH,
+                ['ticket_id' => $ticket->id],
+                '/support/tickets'
+            );
         }
     }
 }

@@ -11,7 +11,7 @@ class UserController extends Controller
     // List all users
     public function index(Request $request)
     {
-        $query = User::with('roles')
+        $query = User::with('roles')->withCount('orders')
             ->whereDoesntHave('roles', function ($q) {
                 $q->where('name', 'admin');
             });
@@ -49,6 +49,7 @@ class UserController extends Controller
                 'avatar' => $user->avatar
                     ? asset('storage/' . $user->avatar)
                     : null,
+                'total_orders' => $user->orders_count,
                 'is_blocked' => $user->is_blocked,
                 'block_reason' => $user->block_reason,
                 'blocked_at' => $user->blocked_at?->format('M d, Y'),

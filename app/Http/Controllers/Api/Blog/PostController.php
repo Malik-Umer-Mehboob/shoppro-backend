@@ -31,8 +31,10 @@ class PostController extends Controller
         }
 
         if ($request->has('search')) {
-            $query->where('title', 'like', "%{$request->search}%")
+            $query->where(function($q) use ($request) {
+                $q->where('title', 'like', "%{$request->search}%")
                   ->orWhere('content', 'like', "%{$request->search}%");
+            });
         }
 
         return response()->json($query->paginate(10));
@@ -40,8 +42,14 @@ class PostController extends Controller
 
     public function show($slug)
     {
-        $post = BlogPost::with(['author', 'category', 'tags', 'approvedComments.user', 'approvedComments.children.user'])
+        $post = BlogPost::with([
+            'author', 'category', 'tags',
+            'rootApprovedComments.user',
+            'rootApprovedComments.approvedChildren.user',
+            'rootApprovedComments.approvedChildren.approvedChildren.user'
+        ])
             ->where('slug', $slug)
+            ->where('status', 'published')
             ->firstOrFail();
 
         $related = $this->blogService->getRelatedPosts($post);
@@ -92,6 +100,17 @@ class PostController extends Controller
                 $tagIds[] = $tag->id;
             }
             $post->tags()->sync($tagIds);
+        }
+
+        if ($request->status === 'published') {
+            \App\Services\NotificationService::notifyAdmins(
+                'New Blog Post Published! ✍️',
+                "Post: '{$post->title}' is now live on the Insights page.",
+                'blog.published',
+                \App\Services\NotificationService::PRIORITY_MEDIUM,
+                ['post_id' => $post->id],
+                "/blog/{$post->slug}"
+            );
         }
 
         return response()->json($post, 201);

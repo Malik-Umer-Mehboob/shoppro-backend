@@ -33,12 +33,19 @@ class TicketController extends Controller
             'subject'  => 'required|string|max:255',
             'message'  => 'required|string',
             'category' => 'required|string',
-            'order_id' => 'nullable|exists:orders,id',
-            'priority' => 'nullable|string|in:Low,Medium,High,Urgent',
+            'order_id'   => 'nullable|exists:orders,id',
+            'priority'   => 'nullable|string|in:Low,Medium,High,Urgent',
+            'attachment' => 'nullable|mimes:jpg,jpeg,png,pdf|max:5120',
         ]);
 
         $data = $request->all();
         $data['customer_id'] = $request->user()->id;
+
+        if ($request->hasFile('attachment')) {
+            $file = $request->file('attachment');
+            $path = $file->store('support-attachments', 'public');
+            $data['attachment'] = $path;
+        }
 
         $ticket = $this->ticketService->createTicket($data);
 
@@ -89,6 +96,7 @@ class TicketController extends Controller
         $request->validate([
             'message'     => 'required|string',
             'is_internal' => 'nullable|boolean',
+            'attachment'  => 'nullable|mimes:jpg,jpeg,png,pdf|max:5120',
         ]);
 
         $ticket = \App\Models\Ticket::findOrFail($id);
@@ -105,6 +113,12 @@ class TicketController extends Controller
             'is_internal' => $request->is_internal ?? false,
         ];
 
+        if ($request->hasFile('attachment')) {
+            $file = $request->file('attachment');
+            $path = $file->store('support-attachments', 'public');
+            $data['attachment'] = $path;
+        }
+
         $message = $this->ticketService->addMessageToTicket($id, $data);
 
         return response()->json(['success' => true, 'data' => $message], 201);
@@ -112,9 +126,9 @@ class TicketController extends Controller
 
     public function updateStatus($id, Request $request)
     {
-        $request->validate(['status' => 'required|string|in:Open,Pending,Resolved,Closed']);
+        $request->validate(['status' => 'required|string|in:Open,In Progress,Resolved,Closed']);
         
-        $ticket = $this->ticketService->updateTicketStatus($id, $request->status);
+        $ticket = $this->ticketService->updateTicketStatus($id, $request->status, $request->user()->id);
 
         return response()->json(['success' => true, 'data' => $ticket]);
     }

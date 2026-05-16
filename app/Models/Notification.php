@@ -7,23 +7,29 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Notification extends Model
 {
-    public $timestamps = false;
+    public $timestamps = true;
 
     protected $fillable = [
         'user_id',
         'type',
         'title',
         'message',
+        'priority',
+        'group_id',
         'data',
         'link',
+        'is_read',
         'read_at',
         'created_at',
+        'updated_at',
     ];
 
     protected $casts = [
         'data'       => 'array',
+        'is_read'    => 'boolean',
         'read_at'    => 'datetime',
         'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
 
     // Notification types

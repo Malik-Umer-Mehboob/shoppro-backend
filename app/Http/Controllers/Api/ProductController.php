@@ -20,7 +20,7 @@ class ProductController extends Controller
      */
     public function index(Request $request)
     {
-        $user = $request->user();
+        $user = $request->user() ?: auth('sanctum')->user();
         $isSeller = $user && $user->hasRole('seller');
         $isAdmin = $user && $user->hasRole('admin');
 
@@ -34,17 +34,18 @@ class ProductController extends Controller
         ]);
 
         if ($isAdmin) {
-            $query = Product::withoutGlobalScopes()
+            $query = Product::query()
                 ->select(
                     'id', 'name', 'slug', 'price', 'sale_price',
                     'thumbnail', 'category_id', 'seller_id',
                     'stock_quantity', 'status', 'is_featured',
                     'sku', 'short_description', 'created_at'
-                )->with(['category:id,name,slug']);
+                )->with(['category:id,name,slug', 'seller:id,name']);
         } elseif ($isSeller) {
             $query->where('seller_id', $user->id);
         } else {
-            $query->where('status', 'published');
+            $query->where('status', 'published')
+                  ->where('moderation_status', 'approved');
         }
 
         if ($request->search) {
@@ -52,8 +53,12 @@ class ProductController extends Controller
                 '%' . $request->search . '%');
         }
 
-        if ($request->status && $isAdmin) {
+        if ($request->status) {
             $query->where('status', $request->status);
+        }
+
+        if ($request->moderation_status) {
+            $query->where('moderation_status', $request->moderation_status);
         }
 
         if ($request->category_id) {
@@ -65,17 +70,25 @@ class ProductController extends Controller
 
         // Stats with single optimized query
         $statsQuery = $isAdmin
-            ? Product::withoutGlobalScopes()
+            ? Product::query()
             : ($isSeller
                 ? Product::where('seller_id', $user->id)
-                : Product::where('status', 'published'));
+                : Product::where('status', 'published')->where('moderation_status', 'approved'));
 
         $stats = [
             'total' => (clone $statsQuery)->count(),
             'published' => (clone $statsQuery)
                 ->where('status', 'published')->count(),
-            'drafts' => (clone $statsQuery)
+            'draft' => (clone $statsQuery)
                 ->where('status', 'draft')->count(),
+            'archived' => (clone $statsQuery)
+                ->where('status', 'archived')->count(),
+            'approved' => (clone $statsQuery)
+                ->where('moderation_status', 'approved')->count(),
+            'pending' => (clone $statsQuery)
+                ->where('moderation_status', 'pending')->count(),
+            'rejected' => (clone $statsQuery)
+                ->where('moderation_status', 'rejected')->count(),
             'low_stock' => (clone $statsQuery)
                 ->whereColumn('stock_quantity', '<=',
                     'low_stock_threshold')
@@ -103,7 +116,19 @@ class ProductController extends Controller
             'short_description'  => 'nullable|string|max:500',
             'price'              => 'required|numeric|min:0',
             'sale_price'         => 'nullable|numeric|min:0',
-            'category_id'        => 'nullable|exists:categories,id',
+            'category_id'        => [
+                'nullable',
+                'exists:categories,id',
+                function ($attribute, $value, $fail) use ($request) {
+                    $user = $request->user();
+                    if ($user && $user->hasRole('seller')) {
+                        $isAssigned = $user->assignedCategories()->where('categories.id', $value)->exists();
+                        if (!$isAssigned) {
+                            $fail('You are not authorized to upload products in this category.');
+                        }
+                    }
+                },
+            ],
             'stock_quantity'     => 'required|integer|min:0',
             'low_stock_threshold'=> [
                 'nullable',
@@ -131,7 +156,8 @@ class ProductController extends Controller
 
         // Set defaults
         $validated['seller_id'] = auth()->id();
-        $validated['status'] = $validated['status'] ?? 'draft';
+        $validated['status'] = $request->input('status', 'draft');
+        $validated['moderation_status'] = 'pending';
 
         if ($request->hasFile('thumbnail')) {
             $image = $request->file('thumbnail');
@@ -209,7 +235,7 @@ class ProductController extends Controller
                 'variants' => $product->variants,
                 'tags' => $product->tags ?? [],
                 'average_rating' => round($avgRating ?? 0, 1),
-                'review_count' => $reviewCount,
+                'total_reviews' => $reviewCount,
                 // SEO fields
                 'seo' => [
                     'title' => $product->name . ' | ShopPro',
@@ -268,7 +294,20 @@ class ProductController extends Controller
             'short_description'  => 'nullable|string|max:500',
             'price'              => 'sometimes|required|numeric|min:0',
             'sale_price'         => 'nullable|numeric|min:0',
-            'category_id'        => 'sometimes|required|exists:categories,id',
+            'category_id'        => [
+                'sometimes',
+                'required',
+                'exists:categories,id',
+                function ($attribute, $value, $fail) use ($request) {
+                    $user = $request->user();
+                    if ($user && $user->hasRole('seller')) {
+                        $isAssigned = $user->assignedCategories()->where('categories.id', $value)->exists();
+                        if (!$isAssigned) {
+                            $fail('You are not authorized to upload products in this category.');
+                        }
+                    }
+                },
+            ],
             'stock_quantity'     => 'sometimes|required|integer|min:0',
             'low_stock_threshold'=> [
                 'nullable',
@@ -491,14 +530,35 @@ class ProductController extends Controller
         ]);
 
         $product->update(['status' => $request->status]);
-
+        
         return response()->json([
             'success' => true,
             'message' => "Product status updated to {$request->status}",
-            'data' => [
-                'id' => $product->id,
-                'status' => $product->status,
-            ]
+            'data' => $product
+        ]);
+    }
+
+    public function updateModerationStatus(Request $request, $id)
+    {
+        $user = $request->user();
+        if (!$user->hasRole('admin')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized'
+            ], 403);
+        }
+
+        $request->validate([
+            'moderation_status' => 'required|in:pending,approved,rejected',
+        ]);
+
+        $product = Product::findOrFail($id);
+        $product->update(['moderation_status' => $request->moderation_status]);
+
+        return response()->json([
+            'success' => true,
+            'message' => "Product moderation status updated to {$request->moderation_status}",
+            'data' => $product
         ]);
     }
 

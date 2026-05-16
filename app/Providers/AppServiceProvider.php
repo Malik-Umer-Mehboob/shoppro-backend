@@ -26,5 +26,7 @@ class AppServiceProvider extends ServiceProvider
         \Illuminate\Support\Facades\Gate::define('create-blog', function ($user) {
             return $user->hasRole('admin') || $user->hasRole('editor') || $user->hasRole('author');
         });
+
+        \App\Models\Product::observe(\App\Observers\ProductObserver::class);
     }
 }

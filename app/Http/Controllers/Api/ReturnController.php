@@ -124,7 +124,7 @@ class ReturnController extends Controller
                 'order_number' => '#' . str_pad($r->order_id, 4, '0', STR_PAD_LEFT),
                 'customer_name' => $r->order?->user?->name ?? 'Unknown',
                 'customer_email' => $r->order?->user?->email ?? '',
-                'product_name' => $r->orderItem->product->name ?? 'Full Order',
+                'product_name' => $r->orderItem?->product?->name ?? 'Full Order',
                 'reason' => ucfirst(str_replace('_', ' ', $r->reason)),
                 'description' => $r->description,
                 'status' => $r->status,
@@ -219,7 +219,10 @@ class ReturnController extends Controller
 
         // Update order payment status
         if ($return->order) {
-            $return->order->update(['payment_status' => 'refunded']);
+            $return->order->update([
+                'status' => 'refunded',
+                'payment_status' => 'refunded'
+            ]);
         }
 
         return response()->json([

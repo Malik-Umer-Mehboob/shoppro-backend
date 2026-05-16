@@ -18,8 +18,7 @@ class LocalizationController extends Controller
             'languages_all', 3600, // 1 hour
             fn() => \DB::table('languages')
                 ->where('is_active', true)
-                ->select('id', 'name', 'code', 'flag',
-                    'is_default')
+                ->select('id', 'name', 'code', 'is_default')
                 ->get()
         );
 

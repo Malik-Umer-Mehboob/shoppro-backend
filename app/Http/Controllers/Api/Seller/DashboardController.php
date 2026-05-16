@@ -14,23 +14,28 @@ class DashboardController extends Controller
     public function stats()
     {
         $seller = auth()->user();
+        $assignedCategories = $seller->assignedCategories()->get(['categories.id', 'categories.name']);
 
-        // Total products by this seller
         $totalProducts = Product::where('seller_id', $seller->id)->count();
         $publishedProducts = Product::where('seller_id', $seller->id)
             ->where('status', 'published')->count();
         $draftProducts = Product::where('seller_id', $seller->id)
             ->where('status', 'draft')->count();
+        
+        // Moderation Status counts
+        $approvedProducts = Product::where('seller_id', $seller->id)
+            ->where('moderation_status', 'approved')->count();
+        $pendingProducts = Product::where('seller_id', $seller->id)
+            ->where('moderation_status', 'pending')->count();
+        $rejectedProducts = Product::where('seller_id', $seller->id)
+            ->where('moderation_status', 'rejected')->count();
 
         // Total orders containing seller's products
-        $sellerProductIds = Product::where('seller_id', $seller->id)
-            ->pluck('id');
-
-        $totalOrders = OrderItem::whereIn('product_id', $sellerProductIds)
+        $totalOrders = OrderItem::where('seller_id', $seller->id)
             ->distinct('order_id')
             ->count('order_id');
 
-        $thisMonthOrders = OrderItem::whereIn('product_id', $sellerProductIds)
+        $thisMonthOrders = OrderItem::where('seller_id', $seller->id)
             ->whereHas('order', function($q) {
                 $q->whereMonth('created_at', now()->month);
             })
@@ -38,22 +43,22 @@ class DashboardController extends Controller
             ->count('order_id');
 
         // Total revenue from seller's products
-        $totalRevenue = OrderItem::whereIn('product_id', $sellerProductIds)
+        $totalRevenue = OrderItem::where('seller_id', $seller->id)
             ->whereHas('order', function($q) {
-                $q->where('payment_status', 'paid');
+                $q->revenue();
             })
             ->sum('total');
 
-        $thisMonthRevenue = OrderItem::whereIn('product_id', $sellerProductIds)
+        $thisMonthRevenue = OrderItem::where('seller_id', $seller->id)
             ->whereHas('order', function($q) {
-                $q->where('payment_status', 'paid')
+                $q->revenue()
                   ->whereMonth('created_at', now()->month);
             })
             ->sum('total');
 
         // Recent orders
         $recentOrders = OrderItem::with(['order.user', 'product'])
-            ->whereIn('product_id', $sellerProductIds)
+            ->where('seller_id', $seller->id)
             ->latest()
             ->take(5)
             ->get()
@@ -83,10 +88,15 @@ class DashboardController extends Controller
         return response()->json([
             'success' => true,
             'data' => [
+                'seller_name' => $seller->name,
+                'account_status' => $seller->seller_status,
                 'stats' => [
                     'total_products' => $totalProducts,
                     'published_products' => $publishedProducts,
                     'draft_products' => $draftProducts,
+                    'approved_products' => $approvedProducts,
+                    'pending_products' => $pendingProducts,
+                    'rejected_products' => $rejectedProducts,
                     'total_orders' => $totalOrders,
                     'this_month_orders' => $thisMonthOrders,
                     'total_revenue' => $totalRevenue,
@@ -95,6 +105,7 @@ class DashboardController extends Controller
                 ],
                 'recent_orders' => $recentOrders,
                 'low_stock_products' => $lowStockProducts,
+                'assigned_categories' => $assignedCategories,
             ]
         ]);
     }

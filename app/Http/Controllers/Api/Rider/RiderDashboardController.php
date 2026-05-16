@@ -32,14 +32,33 @@ class RiderDashboardController extends Controller
             ->latest()
             ->get()
             ->map(function ($a) {
+                // Parse shipping_address — may be a JSON string or already an array
+                $shippingAddr = null;
+                if ($a->order?->shipping_address) {
+                    $raw = $a->order->shipping_address;
+                    $shippingAddr = is_string($raw)
+                        ? json_decode($raw, true)
+                        : (array) $raw;
+                }
+
+                // Prefer phone from shipping address (entered at checkout), fall back to user profile
+                $phone = $shippingAddr['phone']
+                    ?? $a->order?->user?->mobile_number
+                    ?? null;
+
+                // Prefer full_name from shipping address, fall back to user account name
+                $name = $shippingAddr['full_name']
+                    ?? $a->order?->user?->name
+                    ?? 'Guest';
+
                 return [
-                    'id' => $a->id,
-                    'order_number' => '#' . str_pad($a->order_id, 4, '0', STR_PAD_LEFT),
-                    'customer_name' => $a->order?->user?->name ?? 'Guest',
-                    'customer_phone' => $a->order?->user?->mobile_number ?? 'N/A',
-                    'delivery_address' => $a->order->shipping_address ?? 'N/A',
-                    'status' => $a->status,
-                    'assigned_at' => $a->created_at->diffForHumans(),
+                    'id'               => $a->id,
+                    'order_number'     => '#' . str_pad($a->order_id, 4, '0', STR_PAD_LEFT),
+                    'customer_name'    => $name,
+                    'customer_phone'   => $phone,
+                    'delivery_address' => $shippingAddr,
+                    'status'           => $a->status,
+                    'assigned_at'      => $a->created_at->diffForHumans(),
                 ];
             });
 
@@ -76,31 +95,45 @@ class RiderDashboardController extends Controller
                 'orders.payment_method',
                 'orders.shipping_address',
                 'users.name as customer_name',
-                'users.mobile_number as customer_phone'
+                'users.mobile_number as customer_mobile'
             )
             ->orderBy('rider_assignments.created_at', 'desc')
             ->get()
             ->map(function ($a) {
+                // Decode shipping_address — it may be a JSON string or already decoded
+                $shippingAddr = null;
+                if ($a->shipping_address) {
+                    $shippingAddr = is_string($a->shipping_address)
+                        ? json_decode($a->shipping_address, true)
+                        : (array) $a->shipping_address;
+                }
+
+                // Prefer phone from shipping address (entered at checkout), fall back to profile mobile
+                $phone = $shippingAddr['phone'] ?? $a->customer_mobile ?? null;
+
+                // Prefer full_name from shipping address, fall back to user account name
+                $customerName = $shippingAddr['full_name'] ?? $a->customer_name ?? 'Customer';
+
                 return [
-                    'id' => $a->id,
-                    'order_id' => $a->order_id,
-                    'status' => $a->status,
+                    'id'         => $a->id,
+                    'order_id'   => $a->order_id,
+                    'status'     => $a->status,
                     'created_at' => $a->created_at,
-                    'order' => [
-                        'grand_total' => $a->grand_total,
-                        'payment_method' => $a->payment_method,
-                        'shipping_address' => $a->shipping_address,
+                    'order'      => [
+                        'grand_total'      => $a->grand_total,
+                        'payment_method'   => $a->payment_method,
+                        'shipping_address' => $shippingAddr,   // decoded array, never a string
                     ],
                     'customer' => [
-                        'name' => $a->customer_name,
-                        'phone' => $a->customer_phone,
+                        'name'  => $customerName,
+                        'phone' => $phone,
                     ],
                 ];
             });
 
         return response()->json([
             'success' => true,
-            'data' => $assignments,
+            'data'    => $assignments,
         ]);
     }
 
@@ -145,6 +178,16 @@ class RiderDashboardController extends Controller
 
             $order = DB::table('orders')->where('id', $assignment->order_id)->first();
             if ($order) {
+                // Requirement 3: Auto-update payment status to 'paid' if it's a COD order
+                if (strtolower($order->payment_method) === 'cod') {
+                    DB::table('orders')
+                        ->where('id', $assignment->order_id)
+                        ->update([
+                            'payment_status' => 'paid',
+                            'updated_at' => now(),
+                        ]);
+                }
+
                 \App\Helpers\NotificationHelper::send(
                     $order->user_id,
                     'order.delivered',

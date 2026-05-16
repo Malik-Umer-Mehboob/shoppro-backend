@@ -43,6 +43,7 @@ use App\Http\Controllers\Api\CouponController;
 use App\Http\Controllers\Api\ReturnController;
 use App\Http\Controllers\Api\NewsletterController as PublicNewsletterController;
 use App\Http\Controllers\Api\Customer\ProfileController as CustomerProfileController;
+use App\Http\Controllers\Api\SupportController;
 
 use App\Http\Controllers\Api\LiveChatController;
 use App\Http\Controllers\Api\GiftCardController;
@@ -56,6 +57,7 @@ use App\Http\Controllers\Api\Seller\SellerAnalyticsController;
 use App\Http\Controllers\Api\Seller\SellerProfileController;
 use App\Http\Controllers\Api\Rider\RiderProfileController;
 use App\Http\Controllers\Api\Support\SupportProfileController;
+use App\Http\Controllers\Api\Support\SupportDashboardController;
 
 Route::prefix('auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
@@ -68,12 +70,14 @@ Route::prefix('auth')->group(function () {
 });
 
 // Public routes
+Route::get('/homepage', [\App\Http\Controllers\Api\HomepageController::class, 'index']);
 Route::get('/categories', [CategoryController::class, 'index']);
 Route::get('/products', [ProductController::class, 'index']);
 Route::get('/products/{id}', [ProductController::class, 'show']);
 Route::get('/wishlist/shared/{token}', [WishlistController::class, 'showPublic']);
 Route::get('/products/{id}/variants', [ProductVariantController::class, 'index']);
 Route::get('/products/{id}/reviews', [ReviewController::class, 'index']);
+Route::middleware('auth:sanctum')->get('/products/{id}/can-review', [ReviewController::class, 'canReview']);
 Route::middleware('auth:sanctum')->post('/products/{id}/reviews', [ReviewController::class, 'store']);
 
 // Cart routes (Guest & Auth)
@@ -98,7 +102,14 @@ Route::get('/kb/{slug}', [KnowledgeBaseController::class, 'show']);
 Route::post('/kb/{id}/vote', [KnowledgeBaseController::class, 'vote']);
 
 // Public support tools
-Route::post('/support/order-lookup', [SupportAgentController::class, 'orderLookup']);
+Route::post('/order-tracking', [SupportController::class, 'orderLookup']);
+
+// Customer specific ticket routes
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/customer/tickets', [TicketController::class, 'index']);
+    Route::get('/customer/tickets/{id}', [TicketController::class, 'show']);
+    Route::post('/customer/tickets/{id}/reply', [TicketController::class, 'addMessage']);
+});
 
 // Public shipping routes
 Route::get('/shipping/zones', [ShippingController::class, 'zones']);
@@ -140,6 +151,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // User: my orders
     Route::get('/user/orders', [UserOrderController::class, 'index']);
+    Route::get('/user/orders/eligible-returns', [UserOrderController::class, 'eligibleReturns']);
     Route::get('/user/orders/{id}', [UserOrderController::class, 'show']);
     Route::post('/user/orders/{id}/refund-request', [UserOrderController::class, 'requestRefund']);
     Route::post('/orders/{id}/cancel', [OrderController::class, 'cancel']);
@@ -179,11 +191,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/orders/{id}/invoice/download', [InvoiceController::class, 'download']);
 
     // Notifications
-    Route::get('/user/notifications', [NotificationController::class, 'index']);
-    Route::get('/user/notifications/unread-count', [NotificationController::class, 'unreadCount']);
-    Route::put('/user/notifications/read-all', [NotificationController::class, 'markAllRead']);
-    Route::put('/user/notifications/{id}/read', [NotificationController::class, 'markRead']);
-    Route::delete('/user/notifications/{id}', [NotificationController::class, 'destroy']);
+    Route::middleware('auth:sanctum')->prefix('notifications')->group(function () {
+        Route::get('/', [NotificationController::class, 'index']);
+        Route::get('/unread-count', [NotificationController::class, 'unreadCount']);
+        Route::post('/{id}/read', [NotificationController::class, 'markRead']);
+        Route::post('/mark-all-read', [NotificationController::class, 'markAllRead']);
+    });
 
     // Notification Preferences
     Route::get('/user/notification-preferences', [NotificationPreferenceController::class, 'show']);
@@ -209,6 +222,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/profile/change-password', [ProfileController::class, 'changePassword']);
 
         Route::get('/dashboard/stats', [AdminDashboardController::class, 'stats']);
+        Route::get('/dashboard/sales-chart', [AdminDashboardController::class, 'salesChart']);
         Route::get('/low-stock', [ProductController::class, 'getLowStockProducts']);
         Route::apiResource('categories', CategoryController::class);
         Route::patch('/categories/{id}/toggle', [CategoryController::class, 'toggle']);
@@ -216,6 +230,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/category-requests/{id}/approve', [\App\Http\Controllers\Api\CategoryRequestController::class, 'approve']);
         Route::post('/category-requests/{id}/reject', [\App\Http\Controllers\Api\CategoryRequestController::class, 'reject']);
         Route::apiResource('discounts', DiscountController::class);
+        Route::patch('/products/{id}/moderation-status', [ProductController::class, 'updateModerationStatus']);
 
         // Admin refund processing
         Route::post('/orders/{id}/refund', [OrderController::class, 'refund']);
@@ -228,7 +243,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/returns', [ReturnController::class, 'adminIndex']);
         Route::post('/returns/{id}/approve', [ReturnController::class, 'approve']);
         Route::post('/returns/{id}/reject', [ReturnController::class, 'reject']);
-        Route::post('/returns/{id}/refunded', [ReturnController::class, 'markRefunded']);
+        Route::post('/returns/{id}/refund', [ReturnController::class, 'markRefunded']);
 
         // Admin shipping management
         Route::get('/shipping/zones', [ShippingController::class, 'index']);
@@ -254,6 +269,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Search Analytics
         Route::get('/search-analytics', [SearchAnalyticsController::class, 'index']);
+        Route::get('/search-analytics/export', [SearchAnalyticsController::class, 'export']);
 
         // Blog Management (Admin)
         Route::get('/blog/categories', [\App\Http\Controllers\Api\Admin\BlogController::class, 'getCategories']);
@@ -271,6 +287,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/users/{id}/unblock', [AdminUserController::class, 'unblock']);
 
         // Review Moderation (Admin)
+        Route::get('/reviews/stats', [ReviewController::class, 'adminStats']);
         Route::get('/reviews', [ReviewController::class, 'adminIndex']);
         Route::post('/reviews/{id}/approve', [ReviewController::class, 'approve']);
         Route::delete('/reviews/{id}/reject', [ReviewController::class, 'reject']);
@@ -280,9 +297,27 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/orders/{id}/assign-rider', [RiderController::class, 'assignRider']);
         Route::get('/rider-assignments', [RiderController::class, 'assignments']);
 
+        // Seller Management (Admin)
+        Route::get('/sellers', [\App\Http\Controllers\Api\Admin\SellerManagementController::class, 'index']);
+        Route::get('/sellers/{id}', [\App\Http\Controllers\Api\Admin\SellerManagementController::class, 'show']);
+        Route::patch('/sellers/{id}/status', [\App\Http\Controllers\Api\Admin\SellerManagementController::class, 'updateStatus']);
+        Route::patch('/sellers/{id}/categories', [\App\Http\Controllers\Api\Admin\SellerManagementController::class, 'updateCategories']);
+        Route::delete('/sellers/{id}', [\App\Http\Controllers\Api\Admin\SellerManagementController::class, 'destroy']);
+
         // Activity Logs
         Route::get('/activity-logs', [\App\Http\Controllers\Api\Admin\ActivityLogController::class, 'index']);
         Route::get('/activity-logs/stats', [\App\Http\Controllers\Api\Admin\ActivityLogController::class, 'stats']);
+
+        // Staff Management (Admin)
+        Route::get('/staff/support', [\App\Http\Controllers\Api\Admin\StaffManagementController::class, 'indexSupport']);
+        Route::post('/staff/support', [\App\Http\Controllers\Api\Admin\StaffManagementController::class, 'storeSupport']);
+        Route::get('/staff/riders', [\App\Http\Controllers\Api\Admin\StaffManagementController::class, 'indexRiders']);
+        Route::get('/staff/riders/{id}', [\App\Http\Controllers\Api\Admin\StaffManagementController::class, 'showRider']);
+        Route::post('/staff/riders', [\App\Http\Controllers\Api\Admin\StaffManagementController::class, 'storeRider']);
+        Route::put('/staff/{id}', [\App\Http\Controllers\Api\Admin\StaffManagementController::class, 'update']);
+        Route::delete('/staff/{id}', [\App\Http\Controllers\Api\Admin\StaffManagementController::class, 'destroy']);
+        Route::patch('/staff/{id}/toggle-status', [\App\Http\Controllers\Api\Admin\StaffManagementController::class, 'toggleStatus']);
+        Route::get('/staff/metrics', [\App\Http\Controllers\Api\Admin\StaffManagementController::class, 'getStaffMetrics']);
 
         // Warehouse Management (Admin)
         Route::apiResource('warehouses', WarehouseController::class);
@@ -293,7 +328,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // Admin or Seller
-    Route::middleware(['admin_or_seller'])->group(function () {
+    Route::middleware(['admin_or_seller', 'seller_approved'])->group(function () {
         Route::apiResource('products', ProductController::class)->except(['index', 'show']);
         Route::post('/products/{id}/images', [ProductController::class, 'uploadImages']);
         Route::delete('/products/{id}/images/{imageId}', [ProductController::class, 'deleteImage']);
@@ -310,6 +345,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Orders (admin sees all, seller sees own via controller logic)
         Route::get('/orders', [OrderController::class, 'index']);
+        Route::get('/orders/export', [OrderController::class, 'export']);
         Route::get('/orders/{id}', [OrderController::class, 'show']);
         Route::put('/orders/{id}', [OrderController::class, 'update']);
     });
@@ -326,12 +362,14 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // Seller
-    Route::middleware('seller')->prefix('seller')->group(function () {
+    Route::middleware(['seller', 'seller_approved'])->prefix('seller')->group(function () {
         Route::get('/dashboard', [SellerDashboardController::class, 'stats']);
+        Route::get('/products', [ProductController::class, 'index']);
         Route::get('/orders', [SellerOrderController::class, 'index']);
         Route::get('/analytics', [SellerAnalyticsController::class, 'index']);
         Route::get('/profile', [SellerProfileController::class, 'show']);
         Route::put('/profile', [SellerProfileController::class, 'update']);
+        Route::post('/profile/re-apply', [SellerProfileController::class, 'reApply']);
         Route::post('/profile/avatar', [SellerProfileController::class, 'uploadAvatar']);
         Route::post('/profile/change-password', [SellerProfileController::class, 'changePassword']);
         Route::get('/reports/sales', [ReportController::class, 'seller']);
@@ -455,6 +493,7 @@ Route::middleware(['auth:sanctum', 'can:manage-blog'])->prefix('admin/blog')->gr
     Route::post('/categories', [\App\Http\Controllers\Api\Blog\CategoryController::class, 'store']);
     Route::get('/comments', [\App\Http\Controllers\Api\Blog\CommentController::class, 'adminIndex']);
     Route::patch('/comments/{comment}/moderate', [\App\Http\Controllers\Api\Blog\CommentController::class, 'moderate']);
+    Route::delete('/comments/{comment}', [\App\Http\Controllers\Api\Blog\CommentController::class, 'destroy']);
 });
 
 // Localization (Public)
@@ -477,6 +516,7 @@ Route::middleware(['auth:sanctum', 'rider'])
 // Support profile routes
 Route::middleware(['auth:sanctum', 'support'])
     ->prefix('support')->group(function () {
+    Route::get('/dashboard', [SupportDashboardController::class, 'index']);
     Route::get('/profile', [SupportProfileController::class, 'show']);
     Route::put('/profile', [SupportProfileController::class, 'update']);
     Route::post('/profile/avatar', [SupportProfileController::class, 'uploadAvatar']);

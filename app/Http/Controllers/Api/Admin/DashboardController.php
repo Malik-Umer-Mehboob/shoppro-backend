@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Models\Product;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Carbon;
 
 class DashboardController extends Controller
 {
@@ -29,12 +30,12 @@ class DashboardController extends Controller
             : ($thisMonthOrders > 0 ? 100 : 0);
 
         // Total Revenue and Growth
-        $totalRevenue = Order::where('payment_status', 'paid')->sum('grand_total');
-        $lastMonthRevenue = Order::where('payment_status', 'paid')
+        $totalRevenue = Order::revenue()->sum('grand_total');
+        $lastMonthRevenue = Order::revenue()
             ->whereMonth('created_at', now()->subMonth()->month)
             ->whereYear('created_at', now()->subMonth()->year)
             ->sum('grand_total');
-        $thisMonthRevenue = Order::where('payment_status', 'paid')
+        $thisMonthRevenue = Order::revenue()
             ->whereMonth('created_at', now()->month)
             ->whereYear('created_at', now()->year)
             ->sum('grand_total');
@@ -60,20 +61,19 @@ class DashboardController extends Controller
             ? round((($thisMonthUsers - $lastMonthUsers) / $lastMonthUsers) * 100, 1) 
             : ($thisMonthUsers > 0 ? 100 : 0);
 
-        // Total Products and Growth (Fix: Use withoutGlobalScopes and include statuses, but exclude soft deleted)
-        $totalProducts = Product::withoutGlobalScopes()->whereNull('deleted_at')->count();
-        $publishedProducts = Product::withoutGlobalScopes()->whereNull('deleted_at')->where('status', 'published')->count();
-        $draftProducts = Product::withoutGlobalScopes()->whereNull('deleted_at')->where('status', 'draft')->count();
-        $archivedProducts = Product::withoutGlobalScopes()->whereNull('deleted_at')->where('status', 'archived')->count();
+        // Total Products and Growth (Simplified: Product::query() excludes soft deleted by default)
+        $totalProducts = Product::count();
+        $publishedProducts = Product::where('status', 'published')->count();
+        $draftProducts = Product::where('status', 'draft')->count();
+        $archivedProducts = Product::where('status', 'archived')->count();
+        $approvedProducts = Product::where('moderation_status', 'approved')->count();
+        $pendingProducts = Product::where('moderation_status', 'pending')->count();
+        $rejectedProducts = Product::where('moderation_status', 'rejected')->count();
 
-        $lastMonthProducts = Product::withoutGlobalScopes()
-            ->whereNull('deleted_at')
-            ->whereMonth('created_at', now()->subMonth()->month)
+        $lastMonthProducts = Product::whereMonth('created_at', now()->subMonth()->month)
             ->whereYear('created_at', now()->subMonth()->year)
             ->count();
-        $thisMonthProducts = Product::withoutGlobalScopes()
-            ->whereNull('deleted_at')
-            ->whereMonth('created_at', now()->month)
+        $thisMonthProducts = Product::whereMonth('created_at', now()->month)
             ->whereYear('created_at', now()->year)
             ->count();
         $productsGrowth = $lastMonthProducts > 0 
@@ -106,15 +106,64 @@ class DashboardController extends Controller
                     'orders_growth' => (float)$ordersGrowth,
                     'total_revenue' => (float)$totalRevenue,
                     'revenue_growth' => (float)$revenueGrowth,
+                    'total_users' => $totalUsers,
                     'new_users' => $thisMonthUsers,
                     'users_growth' => (float)$usersGrowth,
                     'total_products' => $totalProducts,
                     'published_products' => $publishedProducts,
                     'draft_products' => $draftProducts,
                     'archived_products' => $archivedProducts,
+                    'approved_products' => $approvedProducts,
+                    'pending_products' => $pendingProducts,
+                    'rejected_products' => $rejectedProducts,
                     'products_growth' => (float)$productsGrowth,
                 ],
                 'recent_orders' => $recentOrders,
+            ]
+        ]);
+    }
+
+    /**
+     * Get daily sales chart data for the last N days.
+     */
+    public function salesChart(Request $request)
+    {
+        $days = max(7, min(90, (int)$request->get('days', 30)));
+        $startDate = Carbon::today()->subDays($days - 1)->startOfDay();
+        $endDate   = Carbon::today()->endOfDay();
+
+        // Query grouped by date
+        $rows = Order::select(
+                DB::raw('DATE(created_at) as date'),
+                DB::raw('COUNT(*) as order_count'),
+                DB::raw('SUM(grand_total) as revenue')
+            )
+            ->whereBetween('created_at', [$startDate, $endDate])
+            ->groupBy(DB::raw('DATE(created_at)'))
+            ->orderBy('date')
+            ->get()
+            ->keyBy('date');
+
+        // Build a complete date range filling zeros for days with no orders
+        $labels      = [];
+        $revenues    = [];
+        $orderCounts = [];
+
+        for ($i = 0; $i < $days; $i++) {
+            $date   = Carbon::today()->subDays($days - 1 - $i)->toDateString();
+            $label  = Carbon::parse($date)->format('M j');
+            $labels[]      = $label;
+            $revenues[]    = isset($rows[$date]) ? (float)$rows[$date]->revenue    : 0;
+            $orderCounts[] = isset($rows[$date]) ? (int)$rows[$date]->order_count  : 0;
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'labels'       => $labels,
+                'revenue'      => $revenues,
+                'order_count'  => $orderCounts,
+                'days'         => $days,
             ]
         ]);
     }

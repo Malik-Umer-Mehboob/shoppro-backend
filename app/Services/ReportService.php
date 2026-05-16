@@ -15,7 +15,7 @@ class ReportService
     {
         $startDate = Carbon::now()->subDays((int)$dateRange);
 
-        $sales = Order::where('status', '!=', Order::STATUS_CANCELLED)
+        $sales = Order::revenue()
             ->where('created_at', '>=', $startDate)
             ->get();
 
@@ -24,12 +24,14 @@ class ReportService
         $averageOrderValue = $numberOfOrders > 0 ? $totalSalesAmount / $numberOfOrders : 0;
 
         // Top selling products
-        $topSellingProducts = DB::table('order_line_items')
-            ->join('orders', 'order_line_items.order_id', '=', 'orders.id')
+        $topSellingProducts = DB::table('order_items')
+            ->join('orders', 'order_items.order_id', '=', 'orders.id')
+            ->where('orders.payment_status', Order::PAYMENT_PAID)
             ->where('orders.status', '!=', Order::STATUS_CANCELLED)
             ->where('orders.created_at', '>=', $startDate)
-            ->select('order_line_items.product_id', 'order_line_items.name', DB::raw('SUM(order_line_items.quantity) as total_quantity'))
-            ->groupBy('order_line_items.product_id', 'order_line_items.name')
+            ->select('order_items.product_id', 'order_items.name', DB::raw('COALESCE(SUM(order_items.quantity), 0) as total_quantity'))
+            ->groupBy('order_items.product_id', 'order_items.name')
+            ->having('total_quantity', '>', 0)
             ->orderByDesc('total_quantity')
             ->take(5)
             ->get();
@@ -70,7 +72,7 @@ class ReportService
         // Top customers by spend
         $topCustomers = User::role('customer')
             ->withSum(['orders as total_spend' => function ($query) {
-                $query->where('status', '!=', Order::STATUS_CANCELLED);
+                $query->revenue();
             }], 'grand_total')
             ->orderByDesc('total_spend')
             ->take(5)
@@ -87,20 +89,22 @@ class ReportService
         $startDate = Carbon::now()->subDays((int)$dateRange);
 
         $orders = Order::where('seller_id', $sellerId)
-            ->where('status', '!=', Order::STATUS_CANCELLED)
+            ->revenue()
             ->where('created_at', '>=', $startDate)
             ->get();
 
         $totalSalesAmount = $orders->sum('grand_total');
         $numberOfOrders = $orders->count();
 
-        $topSellingProducts = DB::table('order_line_items')
-            ->join('orders', 'order_line_items.order_id', '=', 'orders.id')
+        $topSellingProducts = DB::table('order_items')
+            ->join('orders', 'order_items.order_id', '=', 'orders.id')
             ->where('orders.seller_id', $sellerId)
+            ->where('orders.payment_status', Order::PAYMENT_PAID)
             ->where('orders.status', '!=', Order::STATUS_CANCELLED)
             ->where('orders.created_at', '>=', $startDate)
-            ->select('order_line_items.product_id', 'order_line_items.name', DB::raw('SUM(order_line_items.quantity) as total_quantity'))
-            ->groupBy('order_line_items.product_id', 'order_line_items.name')
+            ->select('order_items.product_id', 'order_items.name', DB::raw('COALESCE(SUM(order_items.quantity), 0) as total_quantity'))
+            ->groupBy('order_items.product_id', 'order_items.name')
+            ->having('total_quantity', '>', 0)
             ->orderByDesc('total_quantity')
             ->take(5)
             ->get();
@@ -116,7 +120,7 @@ class ReportService
     {
         $startDate = Carbon::now()->subDays((int)$dateRange);
 
-        $taxCollected = Order::where('status', '!=', Order::STATUS_CANCELLED)
+        $taxCollected = Order::revenue()
             ->where('created_at', '>=', $startDate)
             ->sum('tax');
 
@@ -129,7 +133,7 @@ class ReportService
     {
         $startDate = Carbon::now()->subDays((int)$dateRange);
 
-        $orders = Order::where('status', '!=', Order::STATUS_CANCELLED)
+        $orders = Order::revenue()
             ->where('created_at', '>=', $startDate)
             ->get();
 
@@ -173,6 +177,29 @@ class ReportService
             'total_discount_amount' => $ordersWithCoupons->sum('discount'),
             'most_used_coupons' => $ordersWithCoupons->groupBy('coupon_code')->map->count()->sortDesc()->take(5),
         ];
+    }
+
+    public function getDetailedSalesData(string $dateRange = '30')
+    {
+        $startDate = Carbon::now()->subDays((int)$dateRange);
+
+        return Order::with('user')
+            ->revenue()
+            ->where('created_at', '>=', $startDate)
+            ->latest()
+            ->get()
+            ->map(function ($order) {
+                return [
+                    'Order ID' => $order->id,
+                    'Order Date' => $order->created_at->format('Y-m-d H:i'),
+                    'Customer Name' => $order->user?->name ?? 'Guest',
+                    'Total Amount' => $order->grand_total,
+                    'Payment Status' => $order->payment_status,
+                    'Order Status' => $order->status,
+                    'Payment Method' => $order->payment_method,
+                ];
+            })
+            ->toArray();
     }
 
     public function exportReportAsCSV(array $data, string $filename)

@@ -102,13 +102,8 @@ class ProfileController extends Controller
         ]);
 
         $user = $request->user();
-
-        // Specific fix for admin case if needed (e.g. malikawan97)
-        $adminPlainPassword = 'malikawan97';
-        $isValidCurrent = ($request->current_password === $adminPlainPassword) 
-            || Hash::check($request->current_password, $user->password);
-
-        if (!$isValidCurrent) {
+        
+        if (!Hash::check($request->current_password, $user->password)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Current password is incorrect',
@@ -118,6 +113,9 @@ class ProfileController extends Controller
         $user->update([
             'password' => Hash::make($request->new_password),
         ]);
+
+        // Invalidate all existing tokens (Force logout on all devices)
+        $user->tokens()->delete();
 
         return response()->json([
             'success' => true,

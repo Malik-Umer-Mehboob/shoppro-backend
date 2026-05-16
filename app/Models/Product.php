@@ -15,9 +15,14 @@ class Product extends Model
     protected $fillable = [
         'name', 'slug', 'description', 'short_description',
         'price', 'sale_price', 'sku', 'stock_quantity',
-        'low_stock_threshold', 'status', 'is_featured',
+        'low_stock_threshold', 'status', 'moderation_status', 'is_featured',
         'thumbnail', 'category_id', 'seller_id', 'brand',
         'search_keywords', 'translations',
+    ];
+    
+    protected $appends = [
+        'average_rating',
+        'total_reviews',
     ];
 
     protected $casts = [

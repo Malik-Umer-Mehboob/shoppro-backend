@@ -45,6 +45,7 @@ class Order extends Model
         'notes',
         'payment_notes',
         'tracking_number',
+        'delivered_at',
     ];
 
     protected $casts = [
@@ -55,6 +56,7 @@ class Order extends Model
         'tax'              => 'float',
         'discount'         => 'float',
         'grand_total'      => 'float',
+        'delivered_at'     => 'datetime',
     ];
 
     // Relationships
@@ -106,15 +108,28 @@ class Order extends Model
 
     public function canBeRefunded(): bool
     {
-        if ($this->status !== self::STATUS_DELIVERED) {
+        if (strtolower($this->status) !== self::STATUS_DELIVERED) {
             return false;
         }
+        
+        $date = $this->delivered_at ?? $this->updated_at;
+        
         // Allow refund within 30 days of delivery
-        return $this->updated_at->diffInDays(now()) <= 30;
+        return $date->diffInDays(now()) <= 30;
     }
 
     public function isOwnedBy(User $user): bool
     {
         return $this->user_id === $user->id;
+    }
+
+    /**
+     * Scope for orders that count towards revenue.
+     * Revenue = Paid orders that are not cancelled.
+     */
+    public function scopeRevenue($query)
+    {
+        return $query->where('payment_status', self::PAYMENT_PAID)
+                     ->where('status', '!=', self::STATUS_CANCELLED);
     }
 }

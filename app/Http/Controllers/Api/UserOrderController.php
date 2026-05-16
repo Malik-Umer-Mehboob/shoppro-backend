@@ -47,12 +47,43 @@ class UserOrderController extends Controller
 
         if (!$order->canBeRefunded()) {
             return response()->json([
-                'message' => 'Refund is only allowed within 14 days of delivery, and only for delivered orders.',
+                'message' => 'Refund is only allowed within 30 days of delivery, and only for delivered orders.',
             ], 422);
         }
 
         $order->update(['status' => Order::STATUS_RETURNED, 'notes' => 'Refund requested by customer.']);
 
         return response()->json(['message' => 'Refund request submitted. Admin will process it shortly.', 'order' => $order->fresh()]);
+    }
+
+    /**
+     * GET /api/user/orders/eligible-returns
+     */
+    public function eligibleReturns(Request $request)
+    {
+        $user = $request->user();
+        
+        $orders = Order::where('user_id', $user->id)
+            ->where(function($q) {
+                $q->whereRaw('LOWER(status) = ?', ['delivered'])
+                  ->orWhere('status', Order::STATUS_DELIVERED);
+            })
+            ->where(function($q) {
+                $q->where(function($sq) {
+                    $sq->whereNotNull('delivered_at')
+                       ->where('delivered_at', '>=', now()->subDays(30));
+                })->orWhere(function($sq) {
+                    $sq->whereNull('delivered_at')
+                       ->where('updated_at', '>=', now()->subDays(30));
+                });
+            })
+            ->with(['items.product'])
+            ->latest()
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => $orders
+        ]);
     }
 }

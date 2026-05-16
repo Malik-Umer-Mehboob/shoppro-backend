@@ -55,4 +55,9 @@ class BlogPost extends Model
     {
         return $this->comments()->where('status', 'approved');
     }
+
+    public function rootApprovedComments(): HasMany
+    {
+        return $this->approvedComments()->whereNull('parent_id');
+    }
 }

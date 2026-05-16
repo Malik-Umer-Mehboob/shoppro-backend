@@ -31,6 +31,9 @@ class CommentController extends Controller
             'status' => 'pending', // Moderation by default
         ]);
 
+        // Dispatch Event for Notifications
+        event(new \App\Events\CommentPosted($comment));
+
         return response()->json($comment, 201);
     }
 
@@ -41,5 +44,12 @@ class CommentController extends Controller
         
         $comment->update(['status' => $request->status]);
         return response()->json($comment);
+    }
+
+    public function destroy(BlogComment $comment)
+    {
+        $this->authorize('manage-blog');
+        $comment->delete();
+        return response()->json(['message' => 'Comment deleted successfully']);
     }
 }

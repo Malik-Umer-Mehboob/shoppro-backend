@@ -52,17 +52,39 @@ class PaymentService
             'payment_id' => $paymentId ?? $order->payment_id,
         ]);
 
+        event(new \App\Events\PaymentVerified($order));
+
         return ['success' => true, 'message' => 'Payment marked as paid'];
     }
 
     public function processRefund(Order $order, string $reason = null): array
     {
+        \Illuminate\Support\Facades\Log::info('Processing refund for order #' . $order->id, ['reason' => $reason]);
+
         $order->update([
+            'status' => 'refunded',
             'payment_status' => 'refunded',
             'payment_notes' => $reason ?? 'Refund processed by admin',
         ]);
 
-        return ['success' => true, 'message' => 'Refund processed successfully'];
+        // Create or update ReturnRequest record for sync
+        $returnRequest = \App\Models\ReturnRequest::updateOrCreate(
+            ['order_id' => $order->id],
+            [
+                'user_id' => $order->user_id,
+                'reason' => 'other',
+                'description' => $reason ?? 'Full order refund processed by admin',
+                'status' => 'refunded',
+                'refund_type' => 'full_refund',
+                'refund_amount' => $order->grand_total,
+                'refunded_at' => now(),
+                'approved_at' => now(),
+            ]
+        );
+
+        \Illuminate\Support\Facades\Log::info('ReturnRequest created/updated for sync', ['id' => $returnRequest->id]);
+
+        return ['success' => true, 'message' => 'Refund processed and synced with Return Requests'];
     }
 
     public function getStripeIntent(Order $order): array

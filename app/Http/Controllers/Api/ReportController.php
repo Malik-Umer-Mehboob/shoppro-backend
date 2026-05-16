@@ -72,14 +72,8 @@ class ReportController extends Controller
 
         switch ($type) {
             case 'sales':
-                $report = $this->reportService->generateMonthlySalesReport($days);
-                // Flatten data for CSV
-                $data = [
-                    ['Metric' => 'Total Sales', 'Value' => $report['total_sales_amount']],
-                    ['Metric' => 'Number of Orders', 'Value' => $report['number_of_orders']],
-                    ['Metric' => 'Average Order Value', 'Value' => $report['average_order_value']],
-                ];
-                $filename = "sales_report_{$days}days.csv";
+                $data = $this->reportService->getDetailedSalesData($days);
+                $filename = "sales-report-last-{$days}-days.csv";
                 break;
             case 'inventory':
                 $report = $this->reportService->generateInventoryReport();

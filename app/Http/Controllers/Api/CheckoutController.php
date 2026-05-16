@@ -114,6 +114,7 @@ class CheckoutController extends Controller
                 'order_id'   => $order->id,
                 'product_id' => $item->product_id,
                 'variant_id' => $item->variant_id,
+                'seller_id'  => $item->product->seller_id,
                 'name'       => $item->product->name,
                 'quantity'   => $item->quantity,
                 'price'      => $price,
@@ -165,48 +166,55 @@ class CheckoutController extends Controller
             ]
         );
 
-        // Notify admin
-        \App\Helpers\NotificationHelper::sendToRole(
-            'admin',
-            'order.new',
-            'New Order Received! 📦',
-            'Order #' . str_pad($order->id, 4, '0', STR_PAD_LEFT)
-                . ' placed - Rs. ' . number_format($order->grand_total),
-            ['url' => '/admin/orders']
-        );
-
-        // Notify support team
-        \App\Helpers\NotificationHelper::sendToRole(
-            'support',
-            'order.new',
-            'New Order Placed 📦',
-            "Customer {$user->name} placed order #"
-                . str_pad($order->id, 4, '0', STR_PAD_LEFT)
-                . ' - Rs. ' . number_format($order->grand_total),
-            ['url' => '/support/tickets']
-        );
-
         // Notify customer
-        \App\Helpers\NotificationHelper::send(
+        \App\Services\NotificationService::send(
             $user->id,
-            'order.confirmed',
-            'Order Confirmed! ✅',
-            'Your order #'
-                . str_pad($order->id, 4, '0', STR_PAD_LEFT)
-                . ' has been confirmed. We will deliver in 2-3 days.',
-            ['url' => '/user/orders']
+            'order.placed',
+            'Order Placed Successfully!',
+            'Your order #' . str_pad($order->id, 4, '0', STR_PAD_LEFT)
+                . ' has been placed. Total: Rs. ' . number_format($order->grand_total),
+            ['order_id' => $order->id]
         );
 
-        // Notify seller(s) for their products
+        // Notify admins
+        \App\Services\NotificationService::sendToAdmins(
+            'new_order',
+            'New Order Received',
+            'Order #' . str_pad($order->id, 4, '0', STR_PAD_LEFT)
+                . ' from ' . $user->name
+                . ' — Rs. ' . number_format($order->grand_total),
+            ['order_id' => $order->id]
+        );
+
+        // Notify sellers
+        \App\Services\NotificationService::sendToSellers(
+            $order->id,
+            'New Order for Your Product',
+            'Order #' . str_pad($order->id, 4, '0', STR_PAD_LEFT) . ' placed',
+            ['order_id' => $order->id]
+        );
+
+        // Check low stock after order placed
         foreach ($cart->items as $item) {
-            $product = \App\Models\Product::find($item->product_id);
-            if ($product && $product->seller_id && $product->seller_id !== $user->id) {
-                \App\Helpers\NotificationHelper::send(
-                    $product->seller_id,
-                    'order.new',
-                    'New Order for Your Product! 🎉',
-                    "Someone ordered '{$product->name}' x{$item->quantity}",
-                    ['url' => '/seller/orders']
+            $product = $item->product->fresh();
+
+            if ($product->stock_quantity <= ($product->low_stock_threshold ?? 5)
+                && $product->stock_quantity > 0) {
+                \App\Services\NotificationService::sendToAdmins(
+                    'low_stock',
+                    'Low Stock Alert',
+                    $product->name . ' has only '
+                        . $product->stock_quantity . ' units left',
+                    ['product_id' => $product->id]
+                );
+            }
+
+            if ($product->stock_quantity === 0) {
+                \App\Services\NotificationService::sendToAdmins(
+                    'out_of_stock',
+                    'Out of Stock',
+                    $product->name . ' is now out of stock',
+                    ['product_id' => $product->id]
                 );
             }
         }

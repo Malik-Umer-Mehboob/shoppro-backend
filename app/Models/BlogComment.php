@@ -38,4 +38,9 @@ class BlogComment extends Model
     {
         return $this->hasMany(BlogComment::class, 'parent_id');
     }
+
+    public function approvedChildren(): HasMany
+    {
+        return $this->children()->where('status', 'approved');
+    }
 }

@@ -20,6 +20,7 @@ class TicketService
                 'priority'    => $data['priority'] ?? 'Low',
                 'subject'     => $data['subject'],
                 'message'     => $data['message'],
+                'attachment'  => $data['attachment'] ?? null,
                 'status'      => 'Open',
             ]);
 
@@ -37,10 +38,14 @@ class TicketService
         return $ticket;
     }
 
-    public function updateTicketStatus($ticketId, $status)
+    public function updateTicketStatus($ticketId, $status, $agentId = null)
     {
         $ticket = Ticket::findOrFail($ticketId);
-        $ticket->update(['status' => $status]);
+        $updateData = ['status' => $status];
+        if ($agentId && !$ticket->agent_id) {
+            $updateData['agent_id'] = $agentId;
+        }
+        $ticket->update($updateData);
         event(new TicketUpdated($ticket));
         return $ticket;
     }
@@ -49,9 +54,18 @@ class TicketService
     {
         return DB::transaction(function () use ($ticketId, $data) {
             $ticket = Ticket::findOrFail($ticketId);
+            
+            // Auto-assign agent if they are the one replying
+            $user = \App\Models\User::find($data['user_id']);
+            if ($user && ($user->isSupportAgent() || $user->isAdmin()) && !$ticket->agent_id) {
+                $ticket->agent_id = $user->id;
+                $ticket->save();
+            }
+
             $message = $ticket->messages()->create([
                 'user_id'     => $data['user_id'],
                 'message'     => $data['message'],
+                'attachment'  => $data['attachment'] ?? null,
                 'is_internal' => $data['is_internal'] ?? false,
             ]);
 
