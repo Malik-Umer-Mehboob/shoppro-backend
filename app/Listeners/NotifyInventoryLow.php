@@ -30,11 +30,11 @@ class NotifyInventoryLow implements ShouldQueue
         if ($seller) {
             NotificationService::send(
                 $seller->id,
+                'stock.low',
                 $title,
                 $message,
-                'stock.low',
-                NotificationService::PRIORITY_CRITICAL,
                 ['product_id' => $product->id],
+                NotificationService::PRIORITY_CRITICAL,
                 '/seller/products'
             );
         }

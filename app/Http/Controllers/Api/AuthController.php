@@ -93,18 +93,8 @@ class AuthController extends Controller
             ]);
         }
         
-        // Send welcome email using template
-        \App\Helpers\EmailHelper::sendTemplate(
-            'welcome_email',
-            $user->email,
-            $user->name,
-            [
-                'name' => $user->name,
-                'email' => $user->email,
-                'role' => $request->role,
-                'status' => $user->seller_status ?? 'active',
-            ]
-        );
+        // Send welcome email using centralized MailService
+        app(\App\Services\MailService::class)->sendWelcomeEmail($user);
 
         // Notify admin of new registration
         \App\Services\NotificationService::notifyAdmins(
@@ -312,7 +302,7 @@ class AuthController extends Controller
             'expires_at' => now()->addMinutes(10),
         ]);
 
-        Mail::to($request->email)->send(new OtpMail($otp));
+        \App\Jobs\SendOtpEmailJob::dispatch($request->email, $otp);
 
         return response()->json([
             'success' => true,
@@ -376,11 +366,11 @@ class AuthController extends Controller
         // Notify user of password reset
         \App\Services\NotificationService::send(
             $user->id,
+            'security.password_reset',
             'Security Alert: Password Reset 🔐',
             'Your password was successfully changed. If you did not perform this action, please contact support immediately.',
-            'security.password_reset',
-            \App\Services\NotificationService::PRIORITY_HIGH,
             ['ip' => $request->ip()],
+            \App\Services\NotificationService::PRIORITY_HIGH,
             '/profile'
         );
 
@@ -423,6 +413,7 @@ class AuthController extends Controller
                     'email_verified_at' => now(),
                 ]);
                 $user->assignRole('customer');
+                \App\Jobs\SendWelcomeEmailJob::dispatch($user);
             } else {
                 if (!$user->google_id) {
                     $user->update(['google_id' => $googleUser->getId()]);

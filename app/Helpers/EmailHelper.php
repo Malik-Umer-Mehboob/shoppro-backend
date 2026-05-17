@@ -33,19 +33,31 @@ class EmailHelper
                 $template->content, $variables
             );
 
-            // Send email
-            Mail::send([], [], function ($message)
-                use ($toEmail, $toName, $subject, $content) {
-                $message
-                    ->to($toEmail, $toName)
-                    ->subject($subject)
-                    ->html($content);
-            });
+            // Create pending log
+            $user = \App\Models\User::where('email', $toEmail)->first();
+            $log = \App\Models\EmailLog::create([
+                'recipient_email' => $toEmail,
+                'template_name' => $templateKey,
+                'status' => 'pending',
+                'user_id' => $user ? $user->id : null,
+            ]);
+
+            // Dispatch to Queue
+            Mail::to($toEmail, $toName)->send(new \App\Mail\TemplateMail(
+                $subject,
+                $content,
+                $templateKey,
+                $toEmail
+            ));
+
+            $log->update(['status' => 'sent']);
 
             return true;
         } catch (\Exception $e) {
-            Log::error("Email send failed [{$templateKey}]: "
-                . $e->getMessage());
+            if (isset($log)) {
+                $log->update(['status' => 'failed', 'error_message' => $e->getMessage()]);
+            }
+            Log::error("Email send failed [{$templateKey}]: " . $e->getMessage());
             return false;
         }
     }

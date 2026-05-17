@@ -52,6 +52,7 @@ class EventServiceProvider extends ServiceProvider
         ],
         \App\Events\PaymentVerified::class => [
             \App\Listeners\NotifyPaymentVerified::class,
+            \App\Listeners\GenerateInvoiceOnPaymentVerified::class,
         ],
     ];
 

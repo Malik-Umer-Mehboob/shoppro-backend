@@ -24,11 +24,11 @@ class NotifyTicketCreated implements ShouldQueue
         // Notify customer
         \App\Services\NotificationService::send(
             $customer->id,
+            'ticket.created',
             'Support Ticket Created ✅',
             "Your ticket #{$ticket->id} has been created successfully.",
-            'ticket.created',
-            \App\Services\NotificationService::PRIORITY_MEDIUM,
             ['ticket_id' => $ticket->id],
+            \App\Services\NotificationService::PRIORITY_MEDIUM,
             '/help'
         );
 
@@ -40,11 +40,11 @@ class NotifyTicketCreated implements ShouldQueue
             // Notify agent
             \App\Services\NotificationService::send(
                 $agent->id,
+                'ticket.assigned',
                 'New Ticket Assigned 🎫',
                 "New ticket #{$ticket->id} assigned to you: {$ticket->subject}",
-                'ticket.assigned',
-                \App\Services\NotificationService::PRIORITY_HIGH,
                 ['ticket_id' => $ticket->id],
+                \App\Services\NotificationService::PRIORITY_HIGH,
                 '/support/tickets'
             );
         }

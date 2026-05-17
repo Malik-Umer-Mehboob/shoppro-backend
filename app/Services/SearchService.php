@@ -163,25 +163,27 @@ class SearchService
      */
     public function getDidYouMean(string $query): ?string
     {
-        // Simple implementation: check against top successful searches
-        $successfulQueries = SearchLog::where('results_count', '>', 0)
-            ->select('query')
-            ->groupBy('query')
-            ->having(DB::raw('count(*)'), '>', 2)
-            ->pluck('query');
+        return \Illuminate\Support\Facades\Cache::remember('did_you_mean_' . md5($query), 86400, function () use ($query) {
+            // Simple implementation: check against top successful searches
+            $successfulQueries = SearchLog::where('results_count', '>', 0)
+                ->select('query')
+                ->groupBy('query')
+                ->having(DB::raw('count(*)'), '>', 2)
+                ->pluck('query');
 
-        $bestMatch = null;
-        $shortestDistance = 3; // Max distance for correction
+            $bestMatch = null;
+            $shortestDistance = 3; // Max distance for correction
 
-        foreach ($successfulQueries as $sQuery) {
-            $dist = levenshtein($query, $sQuery);
-            if ($dist > 0 && $dist < $shortestDistance) {
-                $bestMatch = $sQuery;
-                $shortestDistance = $dist;
+            foreach ($successfulQueries as $sQuery) {
+                $dist = levenshtein($query, $sQuery);
+                if ($dist > 0 && $dist < $shortestDistance) {
+                    $bestMatch = $sQuery;
+                    $shortestDistance = $dist;
+                }
             }
-        }
 
-        return $bestMatch;
+            return $bestMatch;
+        });
     }
 
     /**
@@ -204,73 +206,77 @@ class SearchService
      */
     public function getAvailableFilters(string $query = ''): array
     {
-        $baseQuery = Product::where('status', 'published')
-            ->where('moderation_status', 'approved');
+        $cacheKey = 'search_filters_' . md5($query);
+        
+        return \Illuminate\Support\Facades\Cache::remember($cacheKey, 3600, function () use ($query) {
+            $baseQuery = Product::where('status', 'published')
+                ->where('moderation_status', 'approved');
 
-        if (!empty($query)) {
-            $like = '%' . $query . '%';
-            $baseQuery->where(function ($q) use ($like) {
-                $q->where('name', 'like', $like)
-                  ->orWhere('description', 'like', $like)
-                  ->orWhere('brand', 'like', $like)
-                  ->orWhere('search_keywords', 'like', $like);
-            });
-        }
+            if (!empty($query)) {
+                $like = '%' . $query . '%';
+                $baseQuery->where(function ($q) use ($like) {
+                    $q->where('name', 'like', $like)
+                      ->orWhere('description', 'like', $like)
+                      ->orWhere('brand', 'like', $like)
+                      ->orWhere('search_keywords', 'like', $like);
+                });
+            }
 
-        // Categories with counts
-        $categories = (clone $baseQuery)
-            ->select('category_id', DB::raw('count(*) as count'))
-            ->groupBy('category_id')
-            ->with('category:id,name,slug,parent_id')
-            ->get()
-            ->map(fn($item) => [
-                'id'    => $item->category_id,
-                'name'  => $item->category?->name,
-                'slug'  => $item->category?->slug,
-                'count' => $item->count,
-            ])
-            ->filter(fn($item) => $item['name'] !== null)
-            ->values();
+            // Categories with counts
+            $categories = (clone $baseQuery)
+                ->select('category_id', DB::raw('count(*) as count'))
+                ->groupBy('category_id')
+                ->with('category:id,name,slug,parent_id')
+                ->get()
+                ->map(fn($item) => [
+                    'id'    => $item->category_id,
+                    'name'  => $item->category?->name,
+                    'slug'  => $item->category?->slug,
+                    'count' => $item->count,
+                ])
+                ->filter(fn($item) => $item['name'] !== null)
+                ->values();
 
-        // Brands
-        $brands = (clone $baseQuery)
-            ->whereNotNull('brand')
-            ->select('brand', DB::raw('count(*) as count'))
-            ->groupBy('brand')
-            ->orderByDesc('count')
-            ->get();
+            // Brands
+            $brands = (clone $baseQuery)
+                ->whereNotNull('brand')
+                ->select('brand', DB::raw('count(*) as count'))
+                ->groupBy('brand')
+                ->orderByDesc('count')
+                ->get();
 
-        // Price range
-        $priceRange = (clone $baseQuery)
-            ->selectRaw('MIN(COALESCE(sale_price, price)) as min_price, MAX(COALESCE(sale_price, price)) as max_price')
-            ->first();
+            // Price range
+            $priceRange = (clone $baseQuery)
+                ->selectRaw('MIN(COALESCE(sale_price, price)) as min_price, MAX(COALESCE(sale_price, price)) as max_price')
+                ->first();
 
-        // Colors from variants
-        $colors = ProductVariant::whereIn('product_id', (clone $baseQuery)->select('id'))
-            ->whereNotNull('color')
-            ->select('color', DB::raw('count(DISTINCT product_id) as count'))
-            ->groupBy('color')
-            ->orderByDesc('count')
-            ->get();
+            // Colors from variants
+            $colors = ProductVariant::whereIn('product_id', (clone $baseQuery)->select('id'))
+                ->whereNotNull('color')
+                ->select('color', DB::raw('count(DISTINCT product_id) as count'))
+                ->groupBy('color')
+                ->orderByDesc('count')
+                ->get();
 
-        // Sizes from variants
-        $sizes = ProductVariant::whereIn('product_id', (clone $baseQuery)->select('id'))
-            ->whereNotNull('size')
-            ->select('size', DB::raw('count(DISTINCT product_id) as count'))
-            ->groupBy('size')
-            ->orderByDesc('count')
-            ->get();
+            // Sizes from variants
+            $sizes = ProductVariant::whereIn('product_id', (clone $baseQuery)->select('id'))
+                ->whereNotNull('size')
+                ->select('size', DB::raw('count(DISTINCT product_id) as count'))
+                ->groupBy('size')
+                ->orderByDesc('count')
+                ->get();
 
-        return [
-            'categories' => $categories,
-            'brands'     => $brands,
-            'price_range'=> [
-                'min' => $priceRange->min_price ?? 0,
-                'max' => $priceRange->max_price ?? 10000,
-            ],
-            'colors'     => $colors,
-            'sizes'      => $sizes,
-        ];
+            return [
+                'categories' => $categories,
+                'brands'     => $brands,
+                'price_range'=> [
+                    'min' => $priceRange->min_price ?? 0,
+                    'max' => $priceRange->max_price ?? 10000,
+                ],
+                'colors'     => $colors,
+                'sizes'      => $sizes,
+            ];
+        });
     }
 
     /**

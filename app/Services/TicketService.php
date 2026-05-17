@@ -107,6 +107,22 @@ class TicketService
             $query->where('priority', $filters['priority']);
         }
 
+        if (isset($filters['search']) && !empty(trim($filters['search']))) {
+            $searchTerm = trim($filters['search']);
+            
+            // Check if it's a ticket ID format (numeric, #123, TICKET-123)
+            if (preg_match('/^(#|TICKET-)?(\d+)$/i', $searchTerm, $matches)) {
+                $query->where('id', $matches[2]);
+            } else {
+                $query->where(function($q) use ($searchTerm) {
+                    $q->where('subject', 'like', "%{$searchTerm}%")
+                      ->orWhereHas('customer', function($q2) use ($searchTerm) {
+                          $q2->where('name', 'like', "%{$searchTerm}%");
+                      });
+                });
+            }
+        }
+
         return $query->with(['customer', 'agent'])->orderBy('updated_at', 'desc')->get();
     }
 }

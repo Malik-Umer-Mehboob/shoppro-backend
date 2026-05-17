@@ -50,18 +50,22 @@ class InvoiceController extends Controller
         $order = Order::with(['user', 'items.product', 'invoice'])->findOrFail($orderId);
 
         // Authorise
-        if ($user->hasRole('seller') && $order->seller_id !== $user->id) {
-            return response()->json(['message' => 'Forbidden.'], 403);
-        }
-        if ($user->hasRole('customer') && $order->user_id !== $user->id) {
+        $isOwner = ($order->user_id === $user->id || $order->seller_id === $user->id);
+        $isAdminOrSupport = ($user->isAdmin() || $user->isSupport());
+
+        if (!$isOwner && !$isAdminOrSupport) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
+        \Illuminate\Support\Facades\Log::info('Invoice download requested', ['order_id' => $orderId, 'user_id' => $user->id]);
+
         if (!$order->invoice) {
+            \Illuminate\Support\Facades\Log::info('Generating invoice on the fly');
             $this->invoiceService->generateInvoiceFor($order);
             $order->refresh();
         }
 
-        return $this->invoiceService->downloadInvoicePDF($order->invoice->id);
+        \Illuminate\Support\Facades\Log::info('Serving PDF', ['invoice_id' => $order->invoice->id]);
+        return $this->invoiceService->downloadInvoicePDF($order->invoice->id, $request->has('stream'));
     }
 }

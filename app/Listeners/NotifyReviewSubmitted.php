@@ -28,11 +28,11 @@ class NotifyReviewSubmitted implements ShouldQueue
         if ($seller) {
             NotificationService::send(
                 $seller->id,
+                'review.new',
                 'New Product Review! ⭐',
                 "Your product '{$product->name}' received a {$review->rating}-star review.",
-                'review.new',
-                NotificationService::PRIORITY_MEDIUM,
                 ['review_id' => $review->id],
+                NotificationService::PRIORITY_MEDIUM,
                 '/seller/reviews'
             );
         }

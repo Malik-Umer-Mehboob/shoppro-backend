@@ -126,29 +126,16 @@ class NewsletterController extends Controller
         $sentCount = 0;
         $failedCount = 0;
 
+        // Fetch as model instead of stdClass to pass to Job
+        $newsletterModel = \App\Models\Newsletter::find($id);
+
         foreach ($subscribers as $subscriber) {
             try {
-                Mail::send([], [], function ($message)
-                    use ($subscriber, $newsletter) {
-                    $message
-                        ->to($subscriber->email, $subscriber->name)
-                        ->subject($newsletter->subject)
-                        ->html(
-                            nl2br(e($newsletter->content))
-                            . '<br><br><hr>'
-                            . '<p style="font-size:12px;color:#666;">'
-                            . 'To unsubscribe, click here: '
-                            . '<a href="' . env('APP_URL')
-                            . '/api/newsletter/unsubscribe/'
-                            . $subscriber->unsubscribe_token . '">'
-                            . 'Unsubscribe</a></p>'
-                        );
-                });
+                \App\Jobs\SendNewsletterJob::dispatch($newsletterModel, $subscriber);
                 $sentCount++;
             } catch (\Exception $e) {
                 $failedCount++;
-                Log::error('Newsletter email failed: '
-                    . $e->getMessage());
+                Log::error('Newsletter job dispatch failed: ' . $e->getMessage());
                 continue;
             }
         }

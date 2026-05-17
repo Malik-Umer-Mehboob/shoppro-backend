@@ -21,7 +21,7 @@ class InvoiceService
         $invoice = Invoice::updateOrCreate(
             ['order_id' => $order->id],
             [
-                'billed_to' => $order->billing_address,
+                'billed_to' => $order->billing_address ?? $order->shipping_address,
                 'shipped_to' => $order->shipping_address,
                 'sub_total' => $subtotal,
                 'shipping_cost' => $shipping,
@@ -53,11 +53,13 @@ class InvoiceService
         return $pdf;
     }
 
-    public function downloadInvoicePDF($invoiceId)
+    public function downloadInvoicePDF($invoiceId, $stream = false)
     {
         $invoice = Invoice::findOrFail($invoiceId);
         $pdf = $this->generateInvoicePDF($invoice);
         
-        return $pdf->download($invoice->invoice_number . '.pdf');
+        $filename = $invoice->invoice_number . '.pdf';
+        
+        return $stream ? $pdf->stream($filename) : $pdf->download($filename);
     }
 }

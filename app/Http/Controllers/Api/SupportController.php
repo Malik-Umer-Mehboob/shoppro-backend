@@ -18,11 +18,22 @@ class SupportController extends Controller
             'email'        => 'required|email',
         ]);
 
-        // Find the order by ID and verify it belongs to the user with the provided email
+        // Clean order number (e.g., "#0005" -> "5")
+        $cleanOrderNumber = ltrim(str_replace('#', '', $request->order_number), '0');
+
+        // Find the order by ID and verify it belongs to the user
         $order = Order::with(['items.product', 'items.variant'])
-            ->where('id', $request->order_number)
-            ->whereHas('user', function ($query) use ($request) {
-                $query->where('email', $request->email);
+            ->where('id', $cleanOrderNumber)
+            ->where(function ($query) use ($request) {
+                // Secure lookup: match authenticated user OR match user email
+                $user = auth('sanctum')->user();
+                if ($user) {
+                    $query->where('user_id', $user->id);
+                } else {
+                    $query->whereHas('user', function ($q) use ($request) {
+                        $q->where('email', trim($request->email));
+                    });
+                }
             })
             ->first();
 

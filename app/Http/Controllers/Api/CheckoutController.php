@@ -89,135 +89,75 @@ class CheckoutController extends Controller
         $tax        = 0;
         $grandTotal = $subtotal + $shippingCost - $discount + $tax;
 
-        // Create order
-        $order = Order::create([
-            'user_id'        => $user->id,
-            'status'         => 'pending',
-            'shipping_address' => $request->shipping_address,
-            'payment_method' => $request->payment_method,
-            'payment_status' => 'pending',
-            'subtotal'       => $subtotal,
-            'shipping_cost'  => $shippingCost,
-            'discount'       => $discount,
-            'tax'            => $tax,
-            'grand_total'    => $grandTotal,
-            'coupon_code'    => $couponCode,
-            'notes'          => $request->notes,
-        ]);
-
-        // Create order items + deduct stock
-        foreach ($cart->items as $item) {
-            $price = $item->variant?->price ?? $item->product->sale_price
-                ?? $item->product->price;
-
-            OrderItem::create([
-                'order_id'   => $order->id,
-                'product_id' => $item->product_id,
-                'variant_id' => $item->variant_id,
-                'seller_id'  => $item->product->seller_id,
-                'name'       => $item->product->name,
-                'quantity'   => $item->quantity,
-                'price'      => $price,
-                'total'      => $price * $item->quantity,
+        // Create order within a transaction for atomicity
+        $order = \Illuminate\Support\Facades\DB::transaction(function () use ($user, $request, $cart, $subtotal, $shippingCost, $discount, $tax, $grandTotal, $couponCode, $appliedCoupon) {
+            $order = Order::create([
+                'user_id'        => $user->id,
+                'status'         => 'pending',
+                'shipping_address' => $request->shipping_address,
+                'payment_method' => $request->payment_method,
+                'payment_status' => 'pending',
+                'subtotal'       => $subtotal,
+                'shipping_cost'  => $shippingCost,
+                'discount'       => $discount,
+                'tax'            => $tax,
+                'grand_total'    => $grandTotal,
+                'coupon_code'    => $couponCode,
+                'notes'          => $request->notes,
             ]);
 
-            $item->product->decrement('stock_quantity', $item->quantity);
-        }
+            // Create order items + deduct stock in bulk if possible, or inside transaction
+            foreach ($cart->items as $item) {
+                $price = $item->variant?->price ?? $item->product->sale_price
+                    ?? $item->product->price;
 
-        // Record coupon usage and increment global used count
-        if ($appliedCoupon) {
-            CouponUsage::create([
-                'coupon_id' => $appliedCoupon->id,
-                'user_id'   => $user->id,
-                'order_id'  => $order->id,
-                'used_at'   => now(),
-            ]);
+                OrderItem::create([
+                    'order_id'   => $order->id,
+                    'product_id' => $item->product_id,
+                    'variant_id' => $item->variant_id,
+                    'seller_id'  => $item->product->seller_id,
+                    'name'       => $item->product->name,
+                    'quantity'   => $item->quantity,
+                    'price'      => $price,
+                    'total'      => $price * $item->quantity,
+                ]);
 
-            $appliedCoupon->increment('used_count');
-        }
+                // Ensure stock validation here or via model constraints
+                $item->product->decrement('stock_quantity', $item->quantity);
+            }
 
-        // Process payment method
-        if ($request->payment_method === 'bank_transfer') {
+            // Record coupon usage
+            if ($appliedCoupon) {
+                CouponUsage::create([
+                    'coupon_id' => $appliedCoupon->id,
+                    'user_id'   => $user->id,
+                    'order_id'  => $order->id,
+                    'used_at'   => now(),
+                ]);
+                $appliedCoupon->increment('used_count');
+            }
+
+            // Process payment method notes
+            $paymentNotes = ($request->payment_method === 'bank_transfer') 
+                ? 'Awaiting bank transfer verification. Ref: ' . $request->reference_number 
+                : 'Cash to be collected on delivery';
+
             $order->update([
                 'payment_id'    => $request->reference_number,
-                'payment_notes' => 'Awaiting bank transfer verification. Ref: '
-                    . $request->reference_number,
+                'payment_notes' => $paymentNotes,
             ]);
-        } else {
-            $order->update([
-                'payment_notes' => 'Cash to be collected on delivery',
-            ]);
-        }
 
-        // Clear cart
-        $cart->items()->delete();
+            // Clear cart
+            $cart->items()->delete();
 
-        // Send order confirmation email
-        \App\Helpers\EmailHelper::sendTemplate(
-            'order_confirmation',
-            $user->email,
-            $user->name,
-            [
-                'customer_name' => $user->name,
-                'order_number' => str_pad($order->id, 4, '0', STR_PAD_LEFT),
-                'total' => number_format($order->grand_total),
-                'payment_method' => strtoupper($order->payment_method),
-                'items_count' => $order->items()->count(),
-            ]
-        );
+            return $order;
+        });
 
-        // Notify customer
-        \App\Services\NotificationService::send(
-            $user->id,
-            'order.placed',
-            'Order Placed Successfully!',
-            'Your order #' . str_pad($order->id, 4, '0', STR_PAD_LEFT)
-                . ' has been placed. Total: Rs. ' . number_format($order->grand_total),
-            ['order_id' => $order->id]
-        );
-
-        // Notify admins
-        \App\Services\NotificationService::sendToAdmins(
-            'new_order',
-            'New Order Received',
-            'Order #' . str_pad($order->id, 4, '0', STR_PAD_LEFT)
-                . ' from ' . $user->name
-                . ' — Rs. ' . number_format($order->grand_total),
-            ['order_id' => $order->id]
-        );
-
-        // Notify sellers
-        \App\Services\NotificationService::sendToSellers(
-            $order->id,
-            'New Order for Your Product',
-            'Order #' . str_pad($order->id, 4, '0', STR_PAD_LEFT) . ' placed',
-            ['order_id' => $order->id]
-        );
-
-        // Check low stock after order placed
-        foreach ($cart->items as $item) {
-            $product = $item->product->fresh();
-
-            if ($product->stock_quantity <= ($product->low_stock_threshold ?? 5)
-                && $product->stock_quantity > 0) {
-                \App\Services\NotificationService::sendToAdmins(
-                    'low_stock',
-                    'Low Stock Alert',
-                    $product->name . ' has only '
-                        . $product->stock_quantity . ' units left',
-                    ['product_id' => $product->id]
-                );
-            }
-
-            if ($product->stock_quantity === 0) {
-                \App\Services\NotificationService::sendToAdmins(
-                    'out_of_stock',
-                    'Out of Stock',
-                    $product->name . ' is now out of stock',
-                    ['product_id' => $product->id]
-                );
-            }
-        }
+        // Dispatch heavy tasks to background queue
+        \App\Jobs\ProcessOrderPostCheckout::dispatch($order, $user);
+        
+        // Load invoice if generated synchronously
+        $order->load('invoice');
 
         return response()->json([
             'success' => true,
@@ -225,6 +165,7 @@ class CheckoutController extends Controller
             'data'    => [
                 'order_id'           => $order->id,
                 'order_number'       => '#' . str_pad($order->id, 4, '0', STR_PAD_LEFT),
+                'invoice_number'     => $order->invoice?->invoice_number,
                 'grand_total'        => $grandTotal,
                 'payment_method'     => $request->payment_method,
                 'payment_status'     => 'pending',

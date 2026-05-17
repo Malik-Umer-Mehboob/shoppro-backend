@@ -235,6 +235,16 @@ class CategoryRequestController extends Controller
             Cache::forget('categories_all');
             Cache::forget('categories_tree');
 
+            app(\App\Services\MailService::class)->sendTemplate(
+                'category_approved_email',
+                $user->email,
+                $user->name,
+                [
+                    'name' => $user->name,
+                    'category_name' => $req->name ?? $req->category->name ?? 'Category',
+                ]
+            );
+
             return response()->json([
                 'success' => true, 
                 'message' => 'Request approved and propagated system-wide.'
@@ -260,6 +270,20 @@ class CategoryRequestController extends Controller
             'status' => 'rejected',
             'rejection_reason' => $request->reason
         ]);
+
+        $user = User::find($req->user_id);
+        if ($user) {
+            app(\App\Services\MailService::class)->sendTemplate(
+                'category_rejected_email',
+                $user->email,
+                $user->name,
+                [
+                    'name' => $user->name,
+                    'category_name' => $req->name ?? 'Category',
+                    'reason' => $request->reason,
+                ]
+            );
+        }
 
         return response()->json(['success' => true, 'message' => 'Request rejected']);
     }

@@ -14,7 +14,7 @@ class RequestFeedback
     {
         $order = $event->order->load(['customer', 'items.product']);
 
-        Mail::to($order->customer->email)->send(new OrderDeliveredMail($order));
+        \App\Jobs\SendDeliveryUpdateEmailJob::dispatch($order);
 
         $notificationService = app(NotificationService::class);
         $notificationService->sendOrderNotification($order, Notification::TYPE_ORDER_DELIVERED);

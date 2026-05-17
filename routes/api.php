@@ -325,6 +325,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::patch('/warehouses/{warehouseId}/stock/{productId}', [WarehouseController::class, 'updateStock']);
         Route::delete('/warehouses/{warehouseId}/products/{productId}', [WarehouseController::class, 'removeProduct']);
         Route::get('/warehouses/{id}/available-products', [WarehouseController::class, 'availableProducts']);
+
+        // Admin Invoice Download
+        Route::get('/orders/{id}/invoice', [InvoiceController::class, 'download']);
     });
 
     // Admin or Seller

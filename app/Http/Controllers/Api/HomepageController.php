@@ -9,39 +9,26 @@ use Illuminate\Support\Facades\Cache;
 
 class HomepageController extends Controller
 {
+    protected $productRepository;
+
+    public function __construct(\App\Repositories\ProductRepository $productRepository)
+    {
+        $this->productRepository = $productRepository;
+    }
+
     /**
      * Get optimized homepage data in a single request.
      */
     public function index(Request $request)
     {
-        // Cache homepage data for 1 hour to reduce DB load
         $data = Cache::remember('homepage_data', 3600, function () {
-            
-            // Optimize query: only select needed columns and eager load specific relations
-            $featuredProducts = Product::select(
-                'id', 'name', 'slug', 'price', 'sale_price',
-                'thumbnail', 'category_id', 'status', 'moderation_status', 'is_featured'
-            )
-            ->with(['category:id,name,slug'])
-            ->where('status', 'published')
-            ->where('moderation_status', 'approved')
-            // Optionally, add where('is_featured', true) if needed, 
-            // but the original frontend just fetched latest 8 published products.
-            ->latest()
-            ->take(8)
-            ->get();
+            $featuredProducts = $this->productRepository->getHomepageProducts(8);
 
             return [
-                'featured_products' => $featuredProducts,
-                // Add more keys here in the future without breaking frontend
-                // 'categories' => ...,
-                // 'banners' => ...
+                'featured_products' => \App\Http\Resources\ProductResource::collection($featuredProducts),
             ];
         });
 
-        return response()->json([
-            'success' => true,
-            'data' => $data
-        ]);
+        return $this->success($data, 'Homepage data retrieved successfully');
     }
 }

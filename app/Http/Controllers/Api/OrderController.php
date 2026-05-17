@@ -42,7 +42,7 @@ class OrderController extends Controller
     public function export(Request $request)
     {
         $user = $request->user();
-        $query = Order::with(['customer'])->latest();
+        $query = Order::with(['customer:id,name'])->latest();
 
         if ($user->hasRole('seller')) {
             $query->whereHas('items', function($q) use ($user) {
@@ -53,15 +53,6 @@ class OrderController extends Controller
         if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
-        if ($request->filled('search')) {
-            $search = $request->search;
-            $query->where(function ($q) use ($search) {
-                $q->where('id', 'like', "%{$search}%")
-                  ->orWhereHas('customer', fn($q2) => $q2->where('name', 'like', "%{$search}%"));
-            });
-        }
-
-        $orders = $query->get();
 
         $headers = [
             'Content-Type' => 'text/csv; charset=UTF-8',
@@ -71,15 +62,13 @@ class OrderController extends Controller
             'Expires' => '0',
         ];
 
-        $callback = function () use ($orders) {
+        return response()->stream(function () use ($query) {
             $file = fopen('php://output', 'w');
-            
-            // Add BOM for Excel UTF-8 support
-            fputs($file, "\xEF\xBB\xBF");
-            
+            fputs($file, "\xEF\xBB\xBF"); // BOM for UTF-8
             fputcsv($file, ['Order ID', 'Date', 'Customer Name', 'Total Amount', 'Order Status', 'Payment Status', 'Payment Method']);
 
-            foreach ($orders as $order) {
+            // Use cursor to avoid loading all orders into memory
+            foreach ($query->cursor() as $order) {
                 fputcsv($file, [
                     $order->id,
                     $order->created_at->format('Y-m-d H:i:s'),
@@ -91,9 +80,7 @@ class OrderController extends Controller
                 ]);
             }
             fclose($file);
-        };
-
-        return response()->stream($callback, 200, $headers);
+        }, 200, $headers);
     }
 
     public function show(Request $request, $id)

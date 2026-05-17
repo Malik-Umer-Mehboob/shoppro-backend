@@ -41,11 +41,11 @@ class NewsletterService
         $newsletter = Newsletter::findOrFail($newsletterId);
         $newsletter->update(['status' => 'sending']);
 
-        $subscribers = User::where('subscribed_to_newsletter', true)->get();
-
-        foreach ($subscribers as $user) {
-            SendNewsletterJob::dispatch($newsletter, $user);
-        }
+        User::where('subscribed_to_newsletter', true)->chunk(500, function ($users) use ($newsletter) {
+            foreach ($users as $user) {
+                SendNewsletterJob::dispatch($newsletter, $user);
+            }
+        });
 
         $newsletter->update(['status' => 'sent']);
         return $newsletter;

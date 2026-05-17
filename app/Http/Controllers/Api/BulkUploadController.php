@@ -37,13 +37,18 @@ class BulkUploadController extends Controller
         $categories = $categoriesQuery->get(['categories.id', 'categories.name'])->pluck('id', 'name')->toArray();
 
         foreach ($data as $index => $row) {
-            $row = array_map('trim', $row);
-            if (count($row) < count($header)) {
-                $errors[] = "Row " . ($index + 2) . ": Column count mismatch.";
+            // Skip empty rows
+            if (empty($row) || (count($row) === 1 && empty($row[0]))) {
                 continue;
             }
 
-            $item = array_combine(array_slice($header, 0, count($row)), $row);
+            $row = array_map('trim', $row);
+            if (count($row) !== count($header)) {
+                $errors[] = "Row " . ($index + 2) . ": Column count mismatch (expected " . count($header) . ", got " . count($row) . ").";
+                continue;
+            }
+
+            $item = array_combine($header, $row);
             
             try {
                 if (empty($item['name']) || !isset($item['price'])) {

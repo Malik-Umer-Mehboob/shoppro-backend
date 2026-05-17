@@ -16,12 +16,23 @@ class NotifyPaymentVerified implements ShouldQueue
         if ($customer) {
             NotificationService::send(
                 $customer->id,
+                'payment.verified',
                 'Payment Confirmed! 💳',
                 "Your payment for order #{$order->order_number} has been verified. We are now processing your shipment.",
-                'payment.verified',
-                NotificationService::PRIORITY_HIGH,
                 ['order_id' => $order->id],
+                NotificationService::PRIORITY_HIGH,
                 '/user/orders'
+            );
+
+            \App\Helpers\EmailHelper::sendTemplate(
+                'payment_status_email',
+                $customer->email,
+                $customer->name,
+                [
+                    'name' => $customer->name,
+                    'order_id' => $order->id,
+                    'total' => $order->total_amount ?? $order->total,
+                ]
             );
         }
     }

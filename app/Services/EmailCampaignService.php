@@ -42,39 +42,42 @@ class EmailCampaignService
         $campaign = EmailCampaign::findOrFail($campaignId);
         $campaign->update(['status' => 'sending']);
 
-        $users = collect();
+        $query = null;
         if ($campaign->segment) {
-            $users = $campaign->segment->getMatchingUsers();
+            $query = clone $campaign->segment->getMatchingUsersQuery();
         } elseif (isset($campaign->results['builtin_segment'])) {
             $builtin = $campaign->results['builtin_segment'];
             switch ($builtin) {
                 case 'all_users':
-                    $users = \App\Models\User::whereDoesntHave('roles', function($q){$q->where('name', 'admin');})->get();
+                    $query = \App\Models\User::whereDoesntHave('roles', function($q){$q->where('name', 'admin');});
                     break;
                 case 'all_customers':
-                    $users = \App\Models\User::whereHas('roles', function($q){$q->where('name', 'customer');})->get();
+                    $query = \App\Models\User::whereHas('roles', function($q){$q->where('name', 'customer');});
                     break;
                 case 'all_sellers':
-                    $users = \App\Models\User::whereHas('roles', function($q){$q->where('name', 'seller');})->get();
+                    $query = \App\Models\User::whereHas('roles', function($q){$q->where('name', 'seller');});
                     break;
                 case 'new_users':
-                    $users = \App\Models\User::whereDoesntHave('roles', function($q){$q->where('name', 'admin');})
-                        ->where('created_at', '>=', now()->subDays(30))->get();
+                    $query = \App\Models\User::whereDoesntHave('roles', function($q){$q->where('name', 'admin');})
+                        ->where('created_at', '>=', now()->subDays(30));
                     break;
                 case 'newsletter_subscribers':
-                    $users = \App\Models\User::where('subscribed_to_newsletter', true)->get();
+                    $query = \App\Models\User::where('subscribed_to_newsletter', true);
                     break;
                 default:
-                    $users = \App\Models\User::whereDoesntHave('roles', function($q){$q->where('name', 'admin');})->get();
+                    $query = \App\Models\User::whereDoesntHave('roles', function($q){$q->where('name', 'admin');});
             }
         } else {
             // Default fallback
-            $users = \App\Models\User::whereDoesntHave('roles', function($q){$q->where('name', 'admin');})->get();
+            $query = \App\Models\User::whereDoesntHave('roles', function($q){$q->where('name', 'admin');});
         }
 
-        foreach ($users as $user) {
-            SendEmailCampaignJob::dispatch($campaign, $user);
-        }
+        // Use chunking to optimize performance
+        $query->chunk(500, function ($users) use ($campaign) {
+            foreach ($users as $user) {
+                SendEmailCampaignJob::dispatch($campaign, $user);
+            }
+        });
 
         $campaign->update(['status' => 'sent']);
         return $campaign;

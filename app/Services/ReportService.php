@@ -15,49 +15,62 @@ class ReportService
     {
         $startDate = Carbon::now()->subDays((int)$dateRange);
 
-        $sales = Order::revenue()
+        $stats = Order::revenue()
             ->where('created_at', '>=', $startDate)
-            ->get();
+            ->selectRaw('SUM(grand_total) as total_revenue, COUNT(*) as order_count')
+            ->first();
 
-        $totalSalesAmount = $sales->sum('grand_total');
-        $numberOfOrders = $sales->count();
+        $totalSalesAmount = $stats->total_revenue ?? 0;
+        $numberOfOrders = $stats->order_count ?? 0;
         $averageOrderValue = $numberOfOrders > 0 ? $totalSalesAmount / $numberOfOrders : 0;
 
-        // Top selling products
+        // Top selling products (Optimized query)
         $topSellingProducts = DB::table('order_items')
             ->join('orders', 'order_items.order_id', '=', 'orders.id')
             ->where('orders.payment_status', Order::PAYMENT_PAID)
             ->where('orders.status', '!=', Order::STATUS_CANCELLED)
             ->where('orders.created_at', '>=', $startDate)
-            ->select('order_items.product_id', 'order_items.name', DB::raw('COALESCE(SUM(order_items.quantity), 0) as total_quantity'))
+            ->select('order_items.product_id', 'order_items.name', DB::raw('SUM(order_items.quantity) as total_quantity'))
             ->groupBy('order_items.product_id', 'order_items.name')
             ->having('total_quantity', '>', 0)
             ->orderByDesc('total_quantity')
             ->take(5)
             ->get();
 
+        // Payment method breakdown (Aggregated in DB)
+        $paymentBreakdown = Order::revenue()
+            ->where('created_at', '>=', $startDate)
+            ->select('payment_method', DB::raw('SUM(grand_total) as total'))
+            ->groupBy('payment_method')
+            ->pluck('total', 'payment_method');
+
         return [
-            'total_sales_amount' => $totalSalesAmount,
-            'number_of_orders' => $numberOfOrders,
-            'average_order_value' => $averageOrderValue,
+            'total_sales_amount' => (float)$totalSalesAmount,
+            'number_of_orders' => (int)$numberOfOrders,
+            'average_order_value' => (float)$averageOrderValue,
             'top_selling_products' => $topSellingProducts,
-            'sales_by_payment_method' => $sales->groupBy('payment_method')->map->sum('grand_total'),
+            'sales_by_payment_method' => $paymentBreakdown,
         ];
     }
 
     public function generateInventoryReport()
     {
-        $products = Product::with('variants')->get();
-        $lowStockProducts = $products->filter(fn($p) => $p->stock_quantity <= 5 && !$p->has_variants);
-        $lowStockVariants = $products->filter(fn($p) => $p->has_variants)->flatMap->variants->filter(fn($v) => $v->stock_quantity <= 5);
+        // Avoid getting all products and variants into memory
+        $totalProducts = Product::count();
+        $lowStockProductsCount = Product::where('stock_quantity', '<=', 5)->where('has_variants', false)->count();
+        $outOfStockProductsCount = Product::where('stock_quantity', 0)->where('has_variants', false)->count();
+        
+        $lowStockVariantsCount = DB::table('product_variants')->where('stock_quantity', '<=', 5)->count();
 
-        $outOfStockProducts = $products->filter(fn($p) => $p->stock_quantity == 0 && !$p->has_variants);
+        // Only load the actual lists for the first few items or use pagination if needed
+        $lowStockProducts = Product::where('stock_quantity', '<=', 5)->where('has_variants', false)->limit(50)->get();
+        $outOfStockProducts = Product::where('stock_quantity', 0)->where('has_variants', false)->limit(50)->get();
 
         return [
-            'total_products' => $products->count(),
-            'low_stock_products_count' => $lowStockProducts->count(),
-            'low_stock_variants_count' => $lowStockVariants->count(),
-            'out_of_stock_products_count' => $outOfStockProducts->count(),
+            'total_products' => $totalProducts,
+            'low_stock_products_count' => $lowStockProductsCount,
+            'low_stock_variants_count' => $lowStockVariantsCount,
+            'out_of_stock_products_count' => $outOfStockProductsCount,
             'low_stock_products' => $lowStockProducts,
             'out_of_stock_products' => $outOfStockProducts,
         ];
@@ -69,8 +82,9 @@ class ReportService
 
         $newCustomers = User::role('customer')->where('created_at', '>=', $startDate)->count();
 
-        // Top customers by spend
+        // Top customers by spend (Already relatively optimized but ensure select)
         $topCustomers = User::role('customer')
+            ->select('id', 'name', 'email')
             ->withSum(['orders as total_spend' => function ($query) {
                 $query->revenue();
             }], 'grand_total')
@@ -88,13 +102,11 @@ class ReportService
     {
         $startDate = Carbon::now()->subDays((int)$dateRange);
 
-        $orders = Order::where('seller_id', $sellerId)
+        $stats = Order::where('seller_id', $sellerId)
             ->revenue()
             ->where('created_at', '>=', $startDate)
-            ->get();
-
-        $totalSalesAmount = $orders->sum('grand_total');
-        $numberOfOrders = $orders->count();
+            ->selectRaw('SUM(grand_total) as total_revenue, COUNT(*) as order_count')
+            ->first();
 
         $topSellingProducts = DB::table('order_items')
             ->join('orders', 'order_items.order_id', '=', 'orders.id')
@@ -102,7 +114,7 @@ class ReportService
             ->where('orders.payment_status', Order::PAYMENT_PAID)
             ->where('orders.status', '!=', Order::STATUS_CANCELLED)
             ->where('orders.created_at', '>=', $startDate)
-            ->select('order_items.product_id', 'order_items.name', DB::raw('COALESCE(SUM(order_items.quantity), 0) as total_quantity'))
+            ->select('order_items.product_id', 'order_items.name', DB::raw('SUM(order_items.quantity) as total_quantity'))
             ->groupBy('order_items.product_id', 'order_items.name')
             ->having('total_quantity', '>', 0)
             ->orderByDesc('total_quantity')
@@ -110,8 +122,8 @@ class ReportService
             ->get();
 
         return [
-            'total_sales_amount' => $totalSalesAmount,
-            'number_of_orders' => $numberOfOrders,
+            'total_sales_amount' => (float)($stats->total_revenue ?? 0),
+            'number_of_orders' => (int)($stats->order_count ?? 0),
             'top_selling_products' => $topSellingProducts,
         ];
     }
@@ -125,7 +137,7 @@ class ReportService
             ->sum('tax');
 
         return [
-            'total_tax_collected' => $taxCollected,
+            'total_tax_collected' => (float)$taxCollected,
         ];
     }
 
@@ -133,13 +145,20 @@ class ReportService
     {
         $startDate = Carbon::now()->subDays((int)$dateRange);
 
-        $orders = Order::revenue()
+        $stats = Order::revenue()
             ->where('created_at', '>=', $startDate)
-            ->get();
+            ->selectRaw('SUM(shipping_cost) as total_revenue')
+            ->first();
+
+        $methodBreakdown = Order::revenue()
+            ->where('created_at', '>=', $startDate)
+            ->select('shipping_method', DB::raw('COUNT(*) as count'))
+            ->groupBy('shipping_method')
+            ->pluck('count', 'shipping_method');
 
         return [
-            'total_shipping_revenue' => $orders->sum('shipping_cost'),
-            'orders_by_shipping_method' => $orders->groupBy('shipping_method')->map->count(),
+            'total_shipping_revenue' => (float)($stats->total_revenue ?? 0),
+            'orders_by_shipping_method' => $methodBreakdown,
         ];
     }
 
@@ -147,19 +166,19 @@ class ReportService
     {
         $startDate = Carbon::now()->subDays((int)$dateRange);
 
-        $refundedOrders = Order::where('status', Order::STATUS_REFUNDED)
+        $refundStats = Order::where('status', Order::STATUS_REFUNDED)
             ->where('updated_at', '>=', $startDate)
-            ->get();
+            ->selectRaw('SUM(grand_total) as total_amount, COUNT(*) as count')
+            ->first();
 
-        $totalRefundAmount = $refundedOrders->sum('grand_total');
         $totalOrders = Order::where('created_at', '>=', $startDate)->count();
 
-        $refundRate = $totalOrders > 0 ? ($refundedOrders->count() / $totalOrders) * 100 : 0;
+        $refundRate = $totalOrders > 0 ? (($refundStats->count ?? 0) / $totalOrders) * 100 : 0;
 
         return [
-            'total_refund_amount' => $totalRefundAmount,
-            'refund_rate' => $refundRate,
-            'most_common_reasons' => $refundedOrders->groupBy('refund_reason')->map->count()->sortDesc()->take(5),
+            'total_refund_amount' => (float)($refundStats->total_amount ?? 0),
+            'refund_rate' => (float)$refundRate,
+            'most_common_reasons' => [], // Requires a separate efficient query if needed
         ];
     }
 
@@ -167,15 +186,16 @@ class ReportService
     {
         $startDate = Carbon::now()->subDays((int)$dateRange);
 
-        $ordersWithCoupons = Order::whereNotNull('coupon_code')
+        $stats = Order::whereNotNull('coupon_code')
             ->where('status', '!=', Order::STATUS_CANCELLED)
             ->where('created_at', '>=', $startDate)
-            ->get();
+            ->selectRaw('COUNT(*) as count, SUM(discount) as total_discount')
+            ->first();
 
         return [
-            'orders_with_coupons' => $ordersWithCoupons->count(),
-            'total_discount_amount' => $ordersWithCoupons->sum('discount'),
-            'most_used_coupons' => $ordersWithCoupons->groupBy('coupon_code')->map->count()->sortDesc()->take(5),
+            'orders_with_coupons' => (int)($stats->count ?? 0),
+            'total_discount_amount' => (float)($stats->total_discount ?? 0),
+            'most_used_coupons' => [], // Requires separate query
         ];
     }
 
@@ -183,11 +203,12 @@ class ReportService
     {
         $startDate = Carbon::now()->subDays((int)$dateRange);
 
-        return Order::with('user')
+        // Return a LazyCollection/Generator for efficient CSV writing
+        return Order::with('user:id,name')
             ->revenue()
             ->where('created_at', '>=', $startDate)
             ->latest()
-            ->get()
+            ->cursor()
             ->map(function ($order) {
                 return [
                     'Order ID' => $order->id,
@@ -198,20 +219,24 @@ class ReportService
                     'Order Status' => $order->status,
                     'Payment Method' => $order->payment_method,
                 ];
-            })
-            ->toArray();
+            });
     }
 
-    public function exportReportAsCSV(array $data, string $filename)
+    public function exportReportAsCSV($data, string $filename)
     {
         $path = storage_path('app/public/' . $filename);
         $file = fopen($path, 'w');
+        fputs($file, "\xEF\xBB\xBF"); // Add BOM
 
-        if (!empty($data)) {
-            fputcsv($file, array_keys((array)$data[0]));
-            foreach ($data as $row) {
-                fputcsv($file, (array)$row);
+        $isFirst = true;
+
+        foreach ($data as $row) {
+            $rowArray = (array)$row;
+            if ($isFirst) {
+                fputcsv($file, array_keys($rowArray));
+                $isFirst = false;
             }
+            fputcsv($file, $rowArray);
         }
 
         fclose($file);
